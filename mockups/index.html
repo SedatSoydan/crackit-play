@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crackit home mockups</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Baloo+2:wght@500;700;800&family=Nunito:wght@500;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* Page chrome around the four phone mockups. */
+  :root { --bg: #14172b; --text: #f4f1ec; --muted: #9ba3be; --accent: #ffb23e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 1600px; margin: 0 auto; padding: 28px 16px 60px; }
+  .intro { max-width: 560px; margin: 0 auto 28px; }
+  .intro h1 { margin: 0 0 6px; font-size: 26px; }
+  .intro p { color: var(--muted); margin: 0 0 10px; }
+  .grid { display: flex; flex-wrap: wrap; gap: 40px 32px; justify-content: center; }
+  figure { margin: 0; width: 360px; max-width: 100%; }
+  figcaption { margin-bottom: 12px; }
+  figcaption b { display: block; font-size: 20px; color: var(--accent); }
+  figcaption span { color: var(--muted); font-size: 15px; }
+  .phone { width: 360px; height: 760px; max-width: 100%; border-radius: 34px; overflow: hidden; position: relative;
+           box-shadow: 0 0 0 8px #000, 0 20px 50px rgba(0,0,0,.5); }
+  .screen { position: absolute; inset: 0; display: flex; flex-direction: column; }
+  .scroll { flex: 1; padding: 46px 18px 12px; overflow: hidden; }
+  .tabs { display: flex; justify-content: space-around; padding: 10px 6px 22px; }
+  .tab { display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 11px; width: 70px; }
+  .tab svg { width: 24px; height: 24px; }
+  .row { display: flex; align-items: center; gap: 12px; }
+  .icon { width: 54px; height: 54px; border-radius: 14px; object-fit: cover; flex: none; }
+  .grow { flex: 1; min-width: 0; }
+  .walnut { flex: none; }
+
+  /* ---------- A: Funfair (lively, playful) ---------- */
+  .a { background: linear-gradient(170deg, #6a2cf0 0%, #4a1aa8 55%, #2c0f6e 100%); color: #fff; font-family: Fredoka, sans-serif; }
+  .a .top { display: flex; justify-content: space-between; align-items: center; }
+  .a .hello { font-size: 15px; opacity: .85; }
+  .a .streak { background: #ff8a00; border-radius: 999px; padding: 4px 12px 4px 8px; font-weight: 700; box-shadow: 0 4px 0 #b85f00; }
+  .a .hero { display: flex; align-items: flex-end; gap: 6px; margin: 14px 0 12px; }
+  .a .bubble { background: #fff; color: #3a1580; border-radius: 20px 20px 20px 4px; padding: 10px 14px; font-weight: 600; font-size: 16px; margin-bottom: 40px; box-shadow: 0 4px 0 #c9b8f5; }
+  .a .card { background: #fff; color: #2a1060; border-radius: 26px; padding: 16px; box-shadow: 0 6px 0 #c9b8f5; }
+  .a .card h2 { margin: 0; font-size: 22px; }
+  .a .date { font-size: 13px; color: #7a68a8; }
+  .a .game { margin-top: 12px; padding: 8px; border-radius: 18px; background: #f3eeff; }
+  .a .game.done { background: #e6fbef; }
+  .a .name { font-weight: 600; font-size: 17px; }
+  .a .tag { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; color: #fff; }
+  .a .play { background: #ff4f9a; color: #fff; border-radius: 14px; padding: 8px 14px; font-weight: 700; box-shadow: 0 4px 0 #b52a66; }
+  .a .check { width: 36px; height: 36px; border-radius: 50%; background: #20c374; color: #fff; display: grid; place-items: center; font-weight: 700; }
+  .a .more { margin-top: 18px; font-weight: 600; }
+  .a .chips { display: flex; gap: 10px; margin-top: 8px; }
+  .a .chip { width: 56px; height: 56px; border-radius: 18px; display: grid; place-items: center; font-weight: 700; font-size: 20px; box-shadow: 0 4px 0 rgba(0,0,0,.25); }
+  .a .tabs { background: #fff; color: #9a8cc0; border-radius: 26px 26px 0 0; }
+  .a .tab.on { color: #6a2cf0; font-weight: 600; }
+
+  /* ---------- B: Candy Pop (lively, bold outlines) ---------- */
+  .b { background: #fff3df; color: #1b1b2f; font-family: "Baloo 2", sans-serif;
+       background-image: radial-gradient(#ffc8a8 2px, transparent 2px), radial-gradient(#b9e6ff 2px, transparent 2px);
+       background-size: 34px 34px, 34px 34px; background-position: 0 0, 17px 17px; }
+  .b .top { display: flex; justify-content: space-between; align-items: center; }
+  .b .logo { font-weight: 800; font-size: 26px; letter-spacing: -.5px; }
+  .b .streak { background: #ffd23f; border: 3px solid #1b1b2f; border-radius: 14px; padding: 0 10px; font-weight: 800; box-shadow: 3px 3px 0 #1b1b2f; }
+  .b .hero { display: flex; align-items: center; gap: 10px; margin: 12px 0 14px; background: #fff; border: 3px solid #1b1b2f; border-radius: 22px; padding: 10px 14px; box-shadow: 5px 5px 0 #1b1b2f; }
+  .b .hero b { font-size: 19px; line-height: 1.15; display: block; }
+  .b .hero span { font-size: 14px; color: #555; }
+  .b .label { display: flex; justify-content: space-between; font-weight: 800; font-size: 19px; margin-bottom: 6px; }
+  .b .bar { height: 14px; border: 3px solid #1b1b2f; border-radius: 999px; background: #fff; overflow: hidden; margin-bottom: 12px; }
+  .b .bar i { display: block; height: 100%; width: 33%; background: #2ec4b6; }
+  .b .game { border: 3px solid #1b1b2f; border-radius: 20px; padding: 10px; margin-bottom: 12px; box-shadow: 5px 5px 0 #1b1b2f; }
+  .b .game .icon { border: 3px solid #1b1b2f; }
+  .b .g1 { background: #7ee0c3; } .b .g2 { background: #ff8fab; } .b .g3 { background: #ffd23f; }
+  .b .name { font-weight: 800; font-size: 19px; line-height: 1.1; }
+  .b .area { font-size: 13px; font-weight: 700; opacity: .75; }
+  .b .play { background: #1b1b2f; color: #fff; border-radius: 12px; padding: 4px 14px; font-weight: 800; font-size: 16px; }
+  .b .done { background: #fff; border: 3px solid #1b1b2f; border-radius: 12px; padding: 1px 10px; font-weight: 800; font-size: 14px; }
+  .b .tabs { background: #fff; border-top: 3px solid #1b1b2f; color: #777; font-weight: 700; }
+  .b .tab.on { color: #1b1b2f; }
+  .b .tab.on svg { background: #ffd23f; border-radius: 10px; outline: 3px solid #1b1b2f; }
+
+  /* ---------- C: Cozy Nook (warm, cute) ---------- */
+  .c { background: #f6eee2; color: #4a3424; font-family: Nunito, sans-serif; }
+  .c .top { display: flex; justify-content: space-between; align-items: center; color: #8a6f58; font-weight: 700; font-size: 14px; }
+  .c .streak { background: #fff8ee; border-radius: 999px; padding: 4px 12px; color: #c0612f; box-shadow: 0 2px 8px rgba(120,80,40,.12); }
+  .c .hero { text-align: center; margin: 8px 0 14px; }
+  .c .hero h2 { margin: 4px 0 0; font-size: 24px; font-weight: 800; }
+  .c .hero p { margin: 2px 0 0; color: #8a6f58; font-size: 15px; }
+  .c .card { background: #fffaf3; border-radius: 22px; padding: 6px 14px; box-shadow: 0 6px 20px rgba(120,80,40,.12); }
+  .c .game { padding: 12px 0; border-bottom: 1px dashed #e2d3bf; }
+  .c .game:last-child { border-bottom: 0; }
+  .c .num { width: 28px; height: 28px; border-radius: 50%; border: 2px solid #d9c4a8; display: grid; place-items: center; font-weight: 800; font-size: 13px; color: #a88b6c; flex: none; }
+  .c .num.ok { background: #7fa66a; border-color: #7fa66a; color: #fff; }
+  .c .icon { width: 48px; height: 48px; border-radius: 12px; }
+  .c .name { font-weight: 800; font-size: 17px; }
+  .c .area { font-size: 13px; color: #a88b6c; }
+  .c .play { background: #c0612f; color: #fff; border-radius: 999px; padding: 7px 16px; font-weight: 800; font-size: 14px; }
+  .c .note { margin-top: 16px; background: #efe2cf; border-radius: 16px; padding: 12px 14px; font-size: 14px; color: #6e533d; }
+  .c .tabs { background: #fffaf3; color: #b49b82; box-shadow: 0 -4px 16px rgba(120,80,40,.08); font-weight: 700; }
+  .c .tab.on { color: #c0612f; }
+
+  /* ---------- D: Midnight (clean, elegant) ---------- */
+  .d { background: #0d0f1c; color: #e9e7f2; font-family: Inter, sans-serif; }
+  .d .top { display: flex; justify-content: space-between; align-items: center; }
+  .d .logo { font-weight: 600; letter-spacing: 3px; font-size: 13px; color: #8d90a8; }
+  .d .streak { font-size: 13px; color: #ffb23e; border: 1px solid #3a3320; border-radius: 999px; padding: 3px 10px; }
+  .d .hero { margin: 26px 0 22px; display: flex; align-items: center; gap: 14px; }
+  .d .hero h2 { margin: 0; font-weight: 500; font-size: 26px; line-height: 1.2; }
+  .d .hero p { margin: 4px 0 0; font-size: 14px; color: #8d90a8; }
+  .d .ring { position: relative; width: 74px; height: 74px; flex: none; }
+  .d .ring b { position: absolute; inset: 0; display: grid; place-items: center; font-weight: 500; font-size: 17px; }
+  .d .section { font-size: 12px; letter-spacing: 2px; color: #6d7090; margin-bottom: 4px; }
+  .d .game { padding: 14px 0; border-bottom: 1px solid #1f2236; }
+  .d .icon { width: 46px; height: 46px; border-radius: 12px; }
+  .d .game.done .icon { opacity: .45; }
+  .d .name { font-weight: 500; font-size: 16px; }
+  .d .area { font-size: 13px; color: #6d7090; }
+  .d .play { border: 1px solid #ffb23e; color: #ffb23e; border-radius: 10px; padding: 6px 14px; font-size: 14px; }
+  .d .ok { color: #6fd39a; font-size: 14px; }
+  .d .stats { display: flex; gap: 10px; margin-top: 22px; }
+  .d .stat { flex: 1; border: 1px solid #1f2236; border-radius: 14px; padding: 12px; }
+  .d .stat b { display: block; font-weight: 500; font-size: 20px; }
+  .d .stat span { font-size: 12px; color: #6d7090; }
+  .d .tabs { border-top: 1px solid #1f2236; color: #5d6080; }
+  .d .tab.on { color: #ffb23e; }
+</style>
+</head>
+<body>
+<main>
+  <div class="intro">
+    <h1>Crackit ana ekran taslakları</h1>
+    <p>Dört farklı tarz, hepsinde aynı ekran: <b>Today</b> sekmesi. Ceviz maskot, seri sayacı, günün 3 oyunu (biri bitmiş), altta dört sekme.</p>
+    <p>Bunlar sadece resim, dokununca bir şey olmaz. Beğendiğiniz harfi ve "şunu şundan alalım" türü karışımları söyleyin.</p>
+  </div>
+
+  <div class="grid">
+
+    <!-- ===================== A ===================== -->
+    <figure>
+      <figcaption><b>A · Lunapark</b><span>Canlı ve oyunsu. Mor zemin, tombul beyaz kartlar, basılabilir gibi duran renkli düğmeler.</span></figcaption>
+      <div class="phone"><div class="screen a">
+        <div class="scroll">
+          <div class="top"><div><div class="hello">Good evening</div><div style="font-size:24px;font-weight:700">Crackit</div></div><div class="streak">🔥 4 days</div></div>
+          <div class="hero">
+            <svg class="walnut" width="120" height="120" viewBox="0 0 100 100"><use href="#nut-a"/></svg>
+            <div class="bubble">Two more to crack today!</div>
+          </div>
+          <div class="card">
+            <div class="row"><div class="grow"><h2>Today's Workout</h2><div class="date">Sunday · hardest day</div></div>
+              <svg width="50" height="50" viewBox="0 0 36 36"><circle cx="18" cy="18" r="15" fill="none" stroke="#eee6ff" stroke-width="5"/><circle cx="18" cy="18" r="15" fill="none" stroke="#20c374" stroke-width="5" stroke-linecap="round" stroke-dasharray="31.4 94.2" transform="rotate(-90 18 18)"/><text x="18" y="22" text-anchor="middle" font-size="11" font-weight="700" fill="#2a1060">1/3</text></svg></div>
+            <div class="game done row"><img class="icon" src="fire_ice.svg" alt=""><div class="grow"><div class="name">Fire &amp; Ice</div><span class="tag" style="background:#6a2cf0">LOGIC</span></div><div class="check">✓</div></div>
+            <div class="game row"><img class="icon" src="carnival.png" alt=""><div class="grow"><div class="name">Carnival Memory</div><span class="tag" style="background:#ff4f9a">MEMORY</span></div><div class="play">Play</div></div>
+            <div class="game row"><img class="icon" src="clash.png" alt=""><div class="grow"><div class="name">Color Clash</div><span class="tag" style="background:#ff8a00">ATTENTION</span></div><div class="play">Play</div></div>
+          </div>
+          <div class="more">Free play</div>
+          <div class="chips"><div class="chip" style="background:#ffd23f;color:#5a3c00">SF</div><div class="chip" style="background:#33d1c4;color:#00403b">HG</div><div class="chip" style="background:#ff8a00">QG</div><div class="chip" style="background:#ff4f9a">PQ</div><div class="chip" style="background:#fff;color:#6a2cf0">+9</div></div>
+        </div>
+        <div class="tabs">
+          <div class="tab on"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3 3 10v11h6v-6h6v6h6V10z"/></svg>Today</div>
+          <div class="tab"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg>Games</div>
+          <div class="tab"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="12" width="4" height="9" rx="1"/><rect x="10" y="7" width="4" height="14" rx="1"/><rect x="16" y="3" width="4" height="18" rx="1"/></svg>Progress</div>
+          <div class="tab"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm9 5v-2l-2.2-.4a7 7 0 0 0-.7-1.7l1.3-1.8-1.4-1.4-1.8 1.3a7 7 0 0 0-1.7-.7L14 3h-2l-.4 2.2a7 7 0 0 0-1.7.7L8.1 4.6 6.7 6l1.3 1.8a7 7 0 0 0-.7 1.7L5 11v2l2.2.4c.2.6.4 1.2.7 1.7L6.6 17l1.4 1.4 1.8-1.3c.5.3 1.1.5 1.7.7L12 21h2l.4-2.2c.6-.2 1.2-.4 1.7-.7l1.8 1.3 1.4-1.4-1.3-1.8c.3-.5.5-1.1.7-1.7z"/></svg>Settings</div>
+        </div>
+      </div></div>
+    </figure>
+
+    <!-- ===================== B ===================== -->
+    <figure>
+      <figcaption><b>B · Şeker</b><span>Canlı ve oyunsu, ama daha cesur. Krem zemin, kalın siyah çizgiler, her oyun kendi rengiyle. Çizgi roman hissi.</span></figcaption>
+      <div class="phone"><div class="screen b">
+        <div class="scroll">
+          <div class="top"><div class="logo">crackit!</div><div class="streak">🔥 4</div></div>
+          <div class="hero">
+            <svg class="walnut" width="84" height="84" viewBox="0 0 100 100"><use href="#nut-b"/></svg>
+            <div><b>Nuts! You're on a 4 day streak.</b><span>Crack two more to make it 5.</span></div>
+          </div>
+          <div class="label"><span>Today's 3</span><span>1/3</span></div>
+          <div class="bar"><i></i></div>
+          <div class="game g1 row"><img class="icon" src="fire_ice.svg" alt=""><div class="grow"><div class="name">Fire &amp; Ice</div><div class="area">Logic · 3 stars</div></div><div class="done">DONE ✓</div></div>
+          <div class="game g2 row"><img class="icon" src="carnival.png" alt=""><div class="grow"><div class="name">Carnival Memory</div><div class="area">Memory</div></div><div class="play">PLAY</div></div>
+          <div class="game g3 row"><img class="icon" src="clash.png" alt=""><div class="grow"><div class="name">Color Clash</div><div class="area">Attention</div></div><div class="play">PLAY</div></div>
+          <div class="label" style="margin-top:6px"><span>Just for fun</span><span style="font-size:15px">all 13 ›</span></div>
+          <div class="row" style="gap:10px">
+            <div class="game" style="flex:1;background:#b9e6ff;text-align:center;font-weight:800;padding:8px 0">Snug Fit</div>
+            <div class="game" style="flex:1;background:#d7c4ff;text-align:center;font-weight:800;padding:8px 0">Quantum</div>
+          </div>
+        </div>
+        <div class="tabs">
+          <div class="tab on"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3 3 10v11h6v-6h6v6h6V10z"/></svg>Today</div>
+          <div class="tab"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg>Games</div>
+          <div class="tab"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="12" width="4" height="9" rx="1"/><rect x="10" y="7" width="4" height="14" rx="1"/><rect x="16" y="3" width="4" height="18" rx="1"/></svg>Progress</div>
+          <div class="tab"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm9 5v-2l-2.2-.4a7 7 0 0 0-.7-1.7l1.3-1.8-1.4-1.4-1.8 1.3a7 7 0 0 0-1.7-.7L14 3h-2l-.4 2.2a7 7 0 0 0-1.7.7L8.1 4.6 6.7 6l1.3 1.8a7 7 0 0 0-.7 1.7L5 11v2l2.2.4c.2.6.4 1.2.7 1.7L6.6 17l1.4 1.4 1.8-1.3c.5.3 1.1.5 1.7.7L12 21h2l.4-2.2c.6-.2 1.2-.4 1.7-.7l1.8 1.3 1.4-1.4-1.3-1.8c.3-.5.5-1.1.7-1.7z"/></svg>Settings</div>
+        </div>
+      </div></div>
+    </figure>
+
+    <!-- ===================== C ===================== -->
+    <figure>
+      <figcaption><b>C · Sıcak köşe</b><span>Sıcak ve sevimli. Krem ve ceviz kahvesi, yumuşak gölgeler, sakin bir sabah kahvesi havası.</span></figcaption>
+      <div class="phone"><div class="screen c">
+        <div class="scroll">
+          <div class="top"><span>Sunday, 8 November</span><span class="streak">🔥 4 day streak</span></div>
+          <div class="hero">
+            <svg class="walnut" width="110" height="110" viewBox="0 0 100 100"><use href="#nut-c"/></svg>
+            <h2>Good evening!</h2>
+            <p>Your three for today. One down already.</p>
+          </div>
+          <div class="card">
+            <div class="game row"><div class="num ok">✓</div><img class="icon" src="fire_ice.svg" alt=""><div class="grow"><div class="name">Fire &amp; Ice</div><div class="area">Logic · solved in 2:41</div></div></div>
+            <div class="game row"><div class="num">2</div><img class="icon" src="carnival.png" alt=""><div class="grow"><div class="name">Carnival Memory</div><div class="area">Memory · about 3 min</div></div><div class="play">Play</div></div>
+            <div class="game row"><div class="num">3</div><img class="icon" src="clash.png" alt=""><div class="grow"><div class="name">Color Clash</div><div class="area">Attention · about 2 min</div></div></div>
+          </div>
+          <div class="note">🌰 <b>Nut fact:</b> Sunday boards are the week's hardest. Take your time, there is no clock on the logic puzzle.</div>
+        </div>
+        <div class="tabs">
+          <div class="tab on"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3 3 10v11h6v-6h6v6h6V10z"/></svg>Today</div>
+          <div class="tab"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg>Games</div>
+          <div class="tab"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="12" width="4" height="9" rx="1"/><rect x="10" y="7" width="4" height="14" rx="1"/><rect x="16" y="3" width="4" height="18" rx="1"/></svg>Progress</div>
+          <div class="tab"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm9 5v-2l-2.2-.4a7 7 0 0 0-.7-1.7l1.3-1.8-1.4-1.4-1.8 1.3a7 7 0 0 0-1.7-.7L14 3h-2l-.4 2.2a7 7 0 0 0-1.7.7L8.1 4.6 6.7 6l1.3 1.8a7 7 0 0 0-.7 1.7L5 11v2l2.2.4c.2.6.4 1.2.7 1.7L6.6 17l1.4 1.4 1.8-1.3c.5.3 1.1.5 1.7.7L12 21h2l.4-2.2c.6-.2 1.2-.4 1.7-.7l1.8 1.3 1.4-1.4-1.3-1.8c.3-.5.5-1.1.7-1.7z"/></svg>Settings</div>
+        </div>
+      </div></div>
+    </figure>
+
+    <!-- ===================== D ===================== -->
+    <figure>
+      <figcaption><b>D · Gece yarısı</b><span>Sade ve şık. Koyu zemin, ince çizgiler, tek vurgu rengi. Maskot küçük ve çizgisel; oyunlar öne çıkıyor.</span></figcaption>
+      <div class="phone"><div class="screen d">
+        <div class="scroll">
+          <div class="top"><span class="logo">CRACKIT</span><span class="streak">4 day streak</span></div>
+          <div class="hero">
+            <div class="ring"><svg width="74" height="74" viewBox="0 0 36 36"><circle cx="18" cy="18" r="16" fill="none" stroke="#1f2236" stroke-width="2"/><circle cx="18" cy="18" r="16" fill="none" stroke="#ffb23e" stroke-width="2" stroke-linecap="round" stroke-dasharray="33.5 100.5" transform="rotate(-90 18 18)"/></svg><b>1/3</b></div>
+            <div class="grow"><h2>Today's workout</h2><p>Sunday · the hardest boards</p></div>
+            <svg class="walnut" width="46" height="46" viewBox="0 0 100 100"><use href="#nut-d"/></svg>
+          </div>
+          <div class="section">TODAY</div>
+          <div class="game done row"><img class="icon" src="fire_ice.svg" alt=""><div class="grow"><div class="name">Fire &amp; Ice</div><div class="area">Logic · 2:41</div></div><div class="ok">✓ Done</div></div>
+          <div class="game row"><img class="icon" src="carnival.png" alt=""><div class="grow"><div class="name">Carnival Memory</div><div class="area">Memory</div></div><div class="play">Play</div></div>
+          <div class="game row"><img class="icon" src="clash.png" alt=""><div class="grow"><div class="name">Color Clash</div><div class="area">Attention</div></div><div class="play">Play</div></div>
+          <div class="stats"><div class="stat"><b>12</b><span>days played</span></div><div class="stat"><b>31</b><span>boards solved</span></div><div class="stat"><b>Logic</b><span>strongest area</span></div></div>
+        </div>
+        <div class="tabs">
+          <div class="tab on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3 3 10v11h6v-6h6v6h6V10z"/></svg>Today</div>
+          <div class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg>Games</div>
+          <div class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 20V12M12 20V7M19 20V3"/></svg>Progress</div>
+          <div class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg>Settings</div>
+        </div>
+      </div></div>
+    </figure>
+
+  </div>
+</main>
+
+<!-- Walnut mascots, one per style. -->
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <!-- A: bright, waving, big shiny eyes. -->
+    <g id="nut-a">
+      <path d="M14 58 Q6 70 14 76" stroke="#8a4f24" stroke-width="6" fill="none" stroke-linecap="round"/>
+      <path d="M86 50 Q96 38 90 28" stroke="#8a4f24" stroke-width="6" fill="none" stroke-linecap="round"/>
+      <path d="M50 8 C76 8 88 30 86 56 C84 82 68 94 50 94 C32 94 16 82 14 56 C12 30 24 8 50 8Z" fill="#c98642"/>
+      <path d="M50 8 C76 8 88 30 86 56 C84 82 68 94 50 94" fill="#b06f30"/>
+      <path d="M50 10 Q46 22 52 32 Q46 42 52 52 Q46 62 52 72 Q47 82 50 92" stroke="#7a4219" stroke-width="2.5" fill="none"/>
+      <path d="M28 28 Q32 22 38 24 M64 26 Q70 24 74 30" stroke="#e3a866" stroke-width="3" fill="none" stroke-linecap="round"/>
+      <ellipse cx="36" cy="50" rx="8" ry="10" fill="#fff"/><ellipse cx="65" cy="50" rx="8" ry="10" fill="#fff"/>
+      <circle cx="38" cy="52" r="5" fill="#2a1060"/><circle cx="67" cy="52" r="5" fill="#2a1060"/>
+      <circle cx="40" cy="49" r="2" fill="#fff"/><circle cx="69" cy="49" r="2" fill="#fff"/>
+      <ellipse cx="27" cy="66" rx="6" ry="4" fill="#ff7aa8" opacity=".7"/><ellipse cx="74" cy="66" rx="6" ry="4" fill="#ff7aa8" opacity=".7"/>
+      <path d="M40 68 Q51 80 62 68" stroke="#2a1060" stroke-width="3.5" fill="#ff4f9a" stroke-linecap="round"/>
+    </g>
+    <!-- B: bold outline, cheeky wink. -->
+    <g id="nut-b" stroke="#1b1b2f" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M50 8 C76 8 88 30 86 56 C84 82 68 94 50 94 C32 94 16 82 14 56 C12 30 24 8 50 8Z" fill="#d9924a"/>
+      <path d="M50 10 Q45 22 52 32 Q45 42 52 52 Q45 62 52 72 Q46 82 50 92" fill="none" stroke-width="3"/>
+      <circle cx="35" cy="50" r="6" fill="#1b1b2f"/>
+      <path d="M60 50 Q66 45 72 50" fill="none"/>
+      <path d="M38 66 Q52 82 66 66 Z" fill="#fff"/>
+      <circle cx="26" cy="64" r="4" fill="#ff8fab" stroke="none"/><circle cx="76" cy="64" r="4" fill="#ff8fab" stroke="none"/>
+    </g>
+    <!-- C: soft and sleepy-cute with a little leaf. -->
+    <g id="nut-c">
+      <path d="M50 10 Q58 0 70 4 Q62 14 50 12Z" fill="#7fa66a"/>
+      <path d="M50 12 C74 12 86 32 84 56 C82 80 67 92 50 92 C33 92 18 80 16 56 C14 32 26 12 50 12Z" fill="#b98457"/>
+      <path d="M50 14 Q46 26 51 34 Q46 44 51 52 Q46 62 51 70 Q47 80 50 90" stroke="#8c5c36" stroke-width="2.5" fill="none"/>
+      <path d="M31 52 Q36 57 41 52 M59 52 Q64 57 69 52" stroke="#4a3424" stroke-width="3" fill="none" stroke-linecap="round"/>
+      <ellipse cx="28" cy="63" rx="6" ry="3.5" fill="#e8907a" opacity=".6"/><ellipse cx="72" cy="63" rx="6" ry="3.5" fill="#e8907a" opacity=".6"/>
+      <path d="M44 66 Q50 71 56 66" stroke="#4a3424" stroke-width="3" fill="none" stroke-linecap="round"/>
+    </g>
+    <!-- D: single line drawing. -->
+    <g id="nut-d" fill="none" stroke="#ffb23e" stroke-width="4" stroke-linecap="round">
+      <path d="M50 8 C76 8 88 30 86 56 C84 82 68 94 50 94 C32 94 16 82 14 56 C12 30 24 8 50 8Z"/>
+      <path d="M50 12 Q45 24 52 34 Q45 44 52 54 Q45 64 52 74 Q46 84 50 90"/>
+      <circle cx="34" cy="50" r="2.5" fill="#ffb23e"/><circle cx="68" cy="50" r="2.5" fill="#ffb23e"/>
+    </g>
+  </defs>
+</svg>
+</body>
+</html>
