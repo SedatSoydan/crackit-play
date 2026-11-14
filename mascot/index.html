@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex, nofollow">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crackit mascot drafts</title>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #14172b; --text: #f4f1ec; --muted: #9ba3be; --accent: #ffb23e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 1200px; margin: 0 auto; padding: 28px 16px 60px; }
+  .intro { max-width: 560px; margin: 0 auto 28px; }
+  .intro h1 { margin: 0 0 6px; font-size: 26px; }
+  .intro p { color: var(--muted); margin: 0 0 10px; }
+  .grid { display: flex; flex-wrap: wrap; gap: 36px 28px; justify-content: center; }
+  .card { width: 340px; max-width: 100%; }
+  .card b { display: block; font-size: 20px; color: var(--accent); }
+  .card span { color: var(--muted); font-size: 15px; }
+  .stage { margin-top: 12px; border-radius: 28px; background: linear-gradient(170deg, #6a2cf0, #4a1aa8 60%, #2c0f6e);
+           height: 300px; display: grid; place-items: center; }
+  .stage svg { width: 230px; height: 230px; }
+  .uses { display: flex; align-items: center; gap: 18px; margin-top: 14px; }
+  .icon { width: 96px; height: 96px; border-radius: 22px; background: linear-gradient(160deg, #7b3cff, #4a1aa8);
+          display: grid; place-items: center; box-shadow: 0 6px 16px rgba(0,0,0,.4); flex: none; }
+  .icon svg { width: 78px; height: 78px; }
+  .tiny { display: flex; gap: 10px; align-items: center; }
+  .tiny svg { width: 44px; height: 44px; }
+  .tiny .sm svg { width: 28px; height: 28px; }
+  .note { color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="intro">
+    <h1>Ceviz maskot taslakları</h1>
+    <p>Kurabiyeye benzememesi için üç şey değişti: daha açık kabuk rengi, sivri bir uç, kırışık doku ve ortada kabarık bir dikiş.</p>
+    <p>Her taslağın yanında uygulama ikonu ve küçük boyutu da var. Telefonda ikon olarak nasıl duracağı, logoda en önemli şey.</p>
+  </div>
+  <div class="grid">
+
+    <div class="card">
+      <b>1 · Ceviz arkadaş</b><span>Bütün bir ceviz. Kırışıklar ve dikiş onu net olarak ceviz yapıyor. En sade ve en tanıdık seçenek.</span>
+      <div class="stage"><svg viewBox="0 0 100 100"><use href="#whole"/></svg></div>
+      <div class="uses">
+        <div class="icon"><svg viewBox="0 0 100 100"><use href="#whole"/></svg></div>
+        <div class="tiny"><svg viewBox="0 0 100 100"><use href="#whole"/></svg><span class="sm"><svg viewBox="0 0 100 100"><use href="#whole"/></svg></span><span class="note">küçük boyut</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <b>2 · Çatlak ceviz</b><span>Kabuğun üst yarısı şapka gibi kalkmış, içinden beyne benzeyen iç ceviz görünüyor. Adın hikâyesini anlatıyor: "crack it".</span>
+      <div class="stage"><svg viewBox="0 0 100 100"><use href="#cracked"/></svg></div>
+      <div class="uses">
+        <div class="icon"><svg viewBox="0 0 100 100"><use href="#cracked"/></svg></div>
+        <div class="tiny"><svg viewBox="0 0 100 100"><use href="#cracked"/></svg><span class="sm"><svg viewBox="0 0 100 100"><use href="#cracked"/></svg></span><span class="note">küçük boyut</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <b>3 · İç ceviz</b><span>Kabuksuz, sadece iç ceviz: iki loblu, beyin gibi kıvrımlı. "Beyin oyunu" mesajı en güçlü olan bu.</span>
+      <div class="stage"><svg viewBox="0 0 100 100"><use href="#kernel"/></svg></div>
+      <div class="uses">
+        <div class="icon"><svg viewBox="0 0 100 100"><use href="#kernel"/></svg></div>
+        <div class="tiny"><svg viewBox="0 0 100 100"><use href="#kernel"/></svg><span class="sm"><svg viewBox="0 0 100 100"><use href="#kernel"/></svg></span><span class="note">küçük boyut</span></div>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <radialGradient id="shell" cx="38%" cy="32%" r="75%">
+      <stop offset="0" stop-color="#e8c48e"/><stop offset=".6" stop-color="#c9975a"/><stop offset="1" stop-color="#9a6a35"/>
+    </radialGradient>
+    <radialGradient id="meat" cx="40%" cy="30%" r="80%">
+      <stop offset="0" stop-color="#fbe7bf"/><stop offset=".65" stop-color="#ecc888"/><stop offset="1" stop-color="#c99a55"/>
+    </radialGradient>
+
+    <!-- Shared face: big shiny eyes, rosy cheeks, open smile. -->
+    <g id="face">
+      <ellipse cx="0" cy="0" rx="7.5" ry="9" fill="#fff"/><ellipse cx="22" cy="0" rx="7.5" ry="9" fill="#fff"/>
+      <circle cx="1.5" cy="1.5" r="4.6" fill="#2a1060"/><circle cx="23.5" cy="1.5" r="4.6" fill="#2a1060"/>
+      <circle cx="3.2" cy="-1" r="1.8" fill="#fff"/><circle cx="25.2" cy="-1" r="1.8" fill="#fff"/>
+      <ellipse cx="-8" cy="11" rx="5" ry="3.2" fill="#ff7aa8" opacity=".75"/><ellipse cx="30" cy="11" rx="5" ry="3.2" fill="#ff7aa8" opacity=".75"/>
+      <path d="M4 13 Q11 22 18 13 Z" fill="#7a1f45" stroke="#2a1060" stroke-width="2.4" stroke-linejoin="round"/>
+      <path d="M7.5 16.5 Q11 19.5 14.5 16.5" fill="#ff8fb5"/>
+    </g>
+
+    <!-- 1: whole walnut with wrinkles and a raised seam. -->
+    <g id="whole">
+      <path d="M50 5 C57 5 64 10 71 16 C84 27 89 43 87 60 C85 80 70 95 50 95 C30 95 15 80 13 60 C11 43 16 27 29 16 C36 10 43 5 50 5Z" fill="url(#shell)" stroke="#7a4a1f" stroke-width="2.2"/>
+      <g fill="none" stroke="#8c5a2a" stroke-width="2" stroke-linecap="round" opacity=".75">
+        <path d="M26 24 Q32 30 28 38 Q24 44 29 50"/><path d="M38 14 Q40 22 36 28"/><path d="M19 46 Q24 52 20 60"/>
+        <path d="M74 24 Q68 30 72 38 Q76 44 71 50"/><path d="M62 14 Q60 22 64 28"/><path d="M81 46 Q76 52 80 60"/>
+        <path d="M22 72 Q28 76 26 84"/><path d="M78 72 Q72 76 74 84"/><path d="M36 86 Q40 82 44 88"/><path d="M64 86 Q60 82 56 88"/>
+      </g>
+      <path d="M50 5 Q46 15 51 24 Q46 33 51 42 Q46 51 51 60 Q46 69 51 78 Q47 87 50 95" fill="none" stroke="#6a3f18" stroke-width="5" stroke-linecap="round"/>
+      <path d="M50 6 Q46.5 15 51 24 Q46.5 33 51 42" fill="none" stroke="#f3d6a6" stroke-width="1.6" stroke-linecap="round" opacity=".8"/>
+      <path d="M30 20 Q35 15 41 16" fill="none" stroke="#fff3dc" stroke-width="3" stroke-linecap="round" opacity=".7"/>
+      <use href="#face" transform="translate(28 55)"/>
+    </g>
+
+    <!-- 2: cracked walnut, lid lifted, brain-like kernel inside. -->
+    <g id="cracked"><g transform="translate(5 10) scale(.9)">
+      <!-- kernel -->
+      <path d="M17 54 C14 42 22 31 33 32 C37 25 47 24 50 30 C53 24 63 25 67 32 C78 31 86 42 83 54 Z" fill="url(#meat)" stroke="#a8743a" stroke-width="2"/>
+      <g fill="none" stroke="#b9853f" stroke-width="1.8" stroke-linecap="round">
+        <path d="M50 30 Q48 40 50 52"/>
+        <path d="M26 38 Q31 41 28 46 Q26 50 31 52"/><path d="M36 33 Q39 38 35 42 Q33 46 38 49"/>
+        <path d="M74 38 Q69 41 72 46 Q74 50 69 52"/><path d="M64 33 Q61 38 65 42 Q67 46 62 49"/>
+      </g>
+      <!-- lower shell with a jagged crack edge -->
+      <path d="M13 54 L21 49 L28 55 L35 48 L42 55 L50 49 L58 55 L65 48 L72 55 L79 49 L87 54 C87 80 72 95 50 95 C28 95 13 80 13 54Z" fill="url(#shell)" stroke="#7a4a1f" stroke-width="2.2" stroke-linejoin="round"/>
+      <g fill="none" stroke="#8c5a2a" stroke-width="2" stroke-linecap="round" opacity=".7">
+        <path d="M20 64 Q25 70 21 77"/><path d="M80 64 Q75 70 79 77"/><path d="M33 86 Q37 82 41 88"/><path d="M67 86 Q63 82 59 88"/>
+      </g>
+      <path d="M50 52 Q47 62 51 72 Q47 82 50 95" fill="none" stroke="#6a3f18" stroke-width="4" stroke-linecap="round"/>
+      <use href="#face" transform="translate(29 66) scale(.9)"/>
+      <!-- lifted lid -->
+      <g transform="rotate(-16 22 40) translate(-2 -6)">
+        <path d="M15 40 C15 22 31 6 50 4 C69 6 85 22 85 40 L78 44 L71 37 L64 44 L57 37 L50 44 L43 37 L36 44 L29 37 L22 44 Z" fill="url(#shell)" stroke="#7a4a1f" stroke-width="2.2" stroke-linejoin="round"/>
+        <g fill="none" stroke="#8c5a2a" stroke-width="2" stroke-linecap="round" opacity=".7">
+          <path d="M28 20 Q33 26 29 33"/><path d="M72 20 Q67 26 71 33"/><path d="M39 11 Q41 17 37 22"/><path d="M61 11 Q59 17 63 22"/>
+        </g>
+        <path d="M50 4 Q46 14 51 24 Q47 32 50 42" fill="none" stroke="#6a3f18" stroke-width="4.5" stroke-linecap="round"/>
+        <path d="M31 16 Q36 11 42 12" fill="none" stroke="#fff3dc" stroke-width="3" stroke-linecap="round" opacity=".7"/>
+      </g>
+    </g></g>
+
+    <!-- 3: the kernel alone, two brain-like lobes. -->
+    <g id="kernel">
+      <path d="M50 14 C44 8 30 8 22 16 C12 25 9 40 12 54 C14 68 22 82 34 88 C41 92 47 90 50 86 C53 90 59 92 66 88 C78 82 86 68 88 54 C91 40 88 25 78 16 C70 8 56 8 50 14Z" fill="url(#meat)" stroke="#a8743a" stroke-width="2.4"/>
+      <path d="M50 14 Q47 30 50 46 Q47 66 50 86" fill="none" stroke="#a8743a" stroke-width="3" stroke-linecap="round"/>
+      <g fill="none" stroke="#c0904a" stroke-width="2" stroke-linecap="round">
+        <path d="M24 22 Q32 26 28 33 Q24 38 31 41"/><path d="M40 13 Q42 21 37 25"/><path d="M15 46 Q21 47 20 54"/>
+        <path d="M76 22 Q68 26 72 33 Q76 38 69 41"/><path d="M60 13 Q58 21 63 25"/><path d="M85 46 Q79 47 80 54"/>
+        <path d="M22 72 Q28 72 30 79"/><path d="M78 72 Q72 72 70 79"/><path d="M40 84 Q42 79 46 80"/><path d="M60 84 Q58 79 54 80"/>
+      </g>
+      <path d="M27 20 Q33 14 41 15" fill="none" stroke="#fffaf0" stroke-width="3" stroke-linecap="round" opacity=".8"/>
+      <use href="#face" transform="translate(28 53)"/>
+    </g>
+  </defs>
+</svg>
+</body>
+</html>
