@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex, nofollow">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bee Line draft 2</title>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #14172b; --text: #f4f1ec; --muted: #9ba3be; --accent: #ffb23e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 900px; margin: 0 auto; padding: 24px 16px 48px; }
+  .intro { max-width: 560px; margin: 0 auto 20px; }
+  .intro h1 { margin: 0 0 6px; font-size: 24px; }
+  .intro p, .intro li { color: var(--muted); margin: 0 0 6px; }
+  .intro ul { padding-left: 18px; margin: 6px 0 0; }
+  .phone { width: 360px; max-width: 100%; margin: 0 auto; border-radius: 30px; overflow: hidden; box-shadow: 0 0 0 8px #000; touch-action: manipulation; }
+  canvas { display: block; width: 100%; height: auto; cursor: pointer; }
+  .row { display: flex; gap: 10px; justify-content: center; margin-top: 14px; }
+  button { font: 600 16px Fredoka, sans-serif; border: 0; border-radius: 14px; padding: 8px 16px; background: #2b3157; color: var(--text); cursor: pointer; }
+  button.on { background: var(--accent); color: #2a1a00; }
+</style>
+</head>
+<body>
+<main>
+  <div class="intro">
+    <h1>Bee Line · taslak 2</h1>
+    <p>Arılar çiçeklerden çıkar, kendi rengindeki kovana gitmeli. Petek şeklindeki makaslara dokun.</p>
+    <ul>
+      <li>Makaslar aynı boyda; açık yol kalın ve bal rengi, kapalı yol ince ve soluk.</li>
+      <li>Açık rotada bal noktacıkları akar: arının nereye gideceği uzaktan okunur.</li>
+      <li>Bu tahta ileri bir seviye gibi: 7 makas, 8 renk. Oyun 2 makas, 3 renkle başlar.</li>
+    </ul>
+  </div>
+  <div class="phone"><canvas id="board" width="360" height="720"></canvas></div>
+  <div class="row"><button id="slow">Yavaş</button><button id="normal" class="on">Normal</button><button id="fast">Hızlı</button></div>
+</main>
+<script>
+(() => {
+  const W = 360, H = 720;
+  const COLORS = ["#ff4d5e", "#ff9f1c", "#ffd23f", "#ff6ad5", "#9b6bff", "#3b8bff", "#2fd4e0", "#f6f6f6"];
+  // A binary tree: the flower patch, seven switches, eight hives.
+  const NODES = {
+    src: [180, 92], j1: [180, 178], j2: [96, 290], j3: [264, 290],
+    j4: [50, 420], j5: [140, 430], j6: [220, 430], j7: [310, 420],
+  };
+  const GOAL_X = [26, 72, 118, 158, 202, 242, 288, 334];
+  const GOAL_Y = [600, 648, 600, 648, 648, 600, 648, 600];
+  const LINKS = [
+    ["src", "j1"], ["j1", "j2"], ["j1", "j3"], ["j2", "j4"], ["j2", "j5"], ["j3", "j6"], ["j3", "j7"],
+    ["j4", "g0"], ["j4", "g1"], ["j5", "g2"], ["j5", "g3"], ["j6", "g4"], ["j6", "g5"], ["j7", "g6"], ["j7", "g7"],
+  ];
+  const SW = ["j1", "j2", "j3", "j4", "j5", "j6", "j7"];
+  const R = 22; // switch radius, the same size as the first draft
+  function pos(id) { return id[0] === "g" ? [GOAL_X[+id[1]], GOAL_Y[+id[1]] - 26] : NODES[id]; }
+
+  // Each link is a smooth curve that leaves its switch towards its child.
+  const edges = {};
+  const outs = {};
+  for (const [a, b] of LINKS) {
+    const p0 = pos(a), p3 = pos(b);
+    const dy = p3[1] - p0[1];
+    const p1 = [p0[0] + (p3[0] - p0[0]) * 0.45, p0[1] + dy * 0.3];
+    const p2 = [p3[0], p3[1] - dy * 0.45];
+    const pts = [];
+    for (let i = 0; i <= 32; i++) {
+      const t = i / 32, u = 1 - t;
+      pts.push([
+        u * u * u * p0[0] + 3 * u * u * t * p1[0] + 3 * u * t * t * p2[0] + t * t * t * p3[0],
+        u * u * u * p0[1] + 3 * u * u * t * p1[1] + 3 * u * t * t * p2[1] + t * t * t * p3[1],
+      ]);
+    }
+    const len = [];
+    let total = 0;
+    for (let i = 1; i < pts.length; i++) { const l = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); len.push(l); total += l; }
+    const dir = [p1[0] - p0[0], p1[1] - p0[1]];
+    const dl = Math.hypot(dir[0], dir[1]) || 1;
+    edges[a + ">" + b] = { pts, len, total, to: b, dir: [dir[0] / dl, dir[1] / dl] };
+    (outs[a] = outs[a] || []).push(a + ">" + b);
+  }
+  function along(e, d) {
+    let rest = d;
+    for (let i = 0; i < e.len.length; i++) {
+      if (rest <= e.len[i] || i === e.len.length - 1) {
+        const a = e.pts[i], b = e.pts[i + 1], t = Math.min(1, rest / e.len[i]);
+        return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, Math.atan2(b[1] - a[1], b[0] - a[0])];
+      }
+      rest -= e.len[i];
+    }
+  }
+  function stroke(ctx, pts, from, to) {
+    ctx.beginPath();
+    ctx.moveTo(pts[from][0], pts[from][1]);
+    for (let i = from + 1; i <= to; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+  }
+  function circle(ctx, x, y, r, fill, line, w) {
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+    if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+    if (line) { ctx.strokeStyle = line; ctx.lineWidth = w || 2; ctx.stroke(); }
+  }
+  function hex(ctx, x, y, r) {
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) { const a = Math.PI / 6 + i * Math.PI / 3; ctx.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r); }
+    ctx.closePath();
+  }
+
+  const canvas = document.getElementById("board");
+  const ctx = canvas.getContext("2d");
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  const state = { j1: 0, j2: 1, j3: 0, j4: 0, j5: 1, j6: 0, j7: 1 };
+  const bump = {};
+  let movers = [], pops = [], right = 0, total = 0, spawnIn = 0.4, speed = 44, gap = 2.2, t = 0, last = performance.now();
+
+  // Scenery is drawn once.
+  const scenery = document.createElement("canvas");
+  scenery.width = W * dpr; scenery.height = H * dpr;
+  (() => {
+    const s = scenery.getContext("2d");
+    s.scale(dpr, dpr);
+    const g = s.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#1b3550"); g.addColorStop(0.22, "#1f4a4a"); g.addColorStop(1, "#24583a");
+    s.fillStyle = g; s.fillRect(0, 0, W, H);
+    for (let i = 0; i < 9; i++) {
+      const x = (i * 131 + 40) % W, y = 140 + (i * 197) % 520, r = 50 + (i * 37) % 60;
+      const b = s.createRadialGradient(x, y, 0, x, y, r);
+      b.addColorStop(0, "rgba(140,220,150,0.10)"); b.addColorStop(1, "rgba(140,220,150,0)");
+      s.fillStyle = b; s.fillRect(x - r, y - r, r * 2, r * 2);
+    }
+    let seed = 7;
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    for (let i = 0; i < 70; i++) {
+      const x = rnd() * W, y = 120 + rnd() * 560;
+      s.strokeStyle = "rgba(160,230,150,0.16)"; s.lineWidth = 2; s.lineCap = "round";
+      s.beginPath(); s.moveTo(x, y); s.quadraticCurveTo(x - 2, y - 6, x - 4, y - 11); s.moveTo(x + 3, y); s.quadraticCurveTo(x + 4, y - 5, x + 7, y - 9); s.stroke();
+    }
+    for (let i = 0; i < 26; i++) {
+      const x = rnd() * W, y = 130 + rnd() * 540;
+      circle(s, x, y, 2.2, ["rgba(255,255,255,0.35)", "rgba(255,210,63,0.35)", "rgba(255,106,213,0.3)"][i % 3]);
+    }
+    // The flower patch the bees leave from.
+    for (const [x, y, c, r] of [[148, 70, "#ffffff", 13], [180, 58, "#ffd1e8", 15], [212, 70, "#ffffff", 13], [164, 92, "#e9d9ff", 10], [196, 92, "#ffffff", 10]]) {
+      for (let p = 0; p < 6; p++) {
+        const a = p * Math.PI / 3;
+        s.beginPath(); s.ellipse(x + Math.cos(a) * r * 0.62, y + Math.sin(a) * r * 0.62, r * 0.46, r * 0.3, a, 0, Math.PI * 2);
+        s.fillStyle = c; s.fill();
+      }
+      circle(s, x, y, r * 0.34, "#ffc21a", "#c47d00", 1.5);
+    }
+  })();
+
+  function activePath() {
+    // Every link a bee would take now from the flowers.
+    const on = new Set();
+    for (const id of SW) on.add(outs[id][state[id]]);
+    return on;
+  }
+  function reachable() {
+    const on = new Set(["src>j1"]);
+    const walk = (id) => { if (!outs[id] || id === "src") return; const e = outs[id][state[id]]; on.add(e); walk(edges[e].to); };
+    walk("j1");
+    return on;
+  }
+
+  function drawTrails(onPath, onSwitch) {
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    for (const k in edges) {
+      const e = edges[k];
+      const live = onSwitch.has(k) || k === "src>j1";
+      // The groove under every trail.
+      stroke(ctx, e.pts, 0, e.pts.length - 1);
+      ctx.lineWidth = 12; ctx.strokeStyle = "rgba(10,30,25,0.45)"; ctx.stroke();
+      ctx.lineWidth = 7; ctx.strokeStyle = live ? "rgba(255,226,140,0.95)" : "rgba(255,240,210,0.16)"; ctx.stroke();
+      if (onPath.has(k)) {
+        // Honey dots flow along the route a bee would take.
+        ctx.setLineDash([0.1, 13]); ctx.lineDashOffset = -t * 28;
+        ctx.lineWidth = 5; ctx.strokeStyle = "#8a5200"; ctx.stroke();
+        ctx.setLineDash([]); ctx.lineDashOffset = 0;
+      }
+    }
+  }
+
+  function drawSwitch(id) {
+    const [x, y] = NODES[id];
+    const s = 1 + (bump[id] || 0) * 0.12;
+    ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+    hex(ctx, 2, 3, R); ctx.fillStyle = "rgba(0,0,0,0.3)"; ctx.fill();
+    hex(ctx, 0, 0, R); ctx.fillStyle = "#fff4d6"; ctx.fill();
+    ctx.lineWidth = 3; ctx.strokeStyle = "#c47d00"; ctx.stroke();
+    // In from the top, out along each branch: the open one bold, the closed one faint.
+    ctx.lineCap = "round";
+    const [a, b] = outs[id];
+    for (const [k, open] of [[a, state[id] === 0], [b, state[id] === 1]]) {
+      const d = edges[k].dir;
+      ctx.beginPath(); ctx.moveTo(0, -R + 2); ctx.quadraticCurveTo(0, 0, d[0] * (R - 3), d[1] * (R - 3));
+      ctx.lineWidth = open ? 8 : 3; ctx.strokeStyle = open ? "#f0a500" : "rgba(196,125,0,0.25)"; ctx.stroke();
+    }
+    const d = edges[outs[id][state[id]]].dir;
+    circle(ctx, d[0] * (R - 3), d[1] * (R - 3), 4.5, "#8a5200");
+    ctx.restore();
+  }
+
+  function drawHive(i) {
+    const x = GOAL_X[i], y = GOAL_Y[i], c = COLORS[i];
+    ctx.save(); ctx.translate(x, y);
+    const w = 19;
+    const dome = () => {
+      ctx.beginPath(); ctx.moveTo(-w, 6); ctx.bezierCurveTo(-w, -26, w, -26, w, 6); ctx.closePath();
+    };
+    dome(); ctx.lineWidth = 7; ctx.strokeStyle = "#ffffff"; ctx.stroke();
+    dome(); ctx.fillStyle = c; ctx.fill();
+    ctx.save(); dome(); ctx.clip();
+    ctx.strokeStyle = "rgba(0,0,0,0.22)"; ctx.lineWidth = 2;
+    for (const yy of [-14, -6, 2]) { ctx.beginPath(); ctx.moveTo(-w, yy); ctx.quadraticCurveTo(0, yy + 4, w, yy); ctx.stroke(); }
+    ctx.restore();
+    ctx.beginPath(); ctx.arc(0, 4, 6, Math.PI, 0); ctx.closePath(); ctx.fillStyle = "#3a2410"; ctx.fill();
+    ctx.fillStyle = "#ffffff"; ctx.fillRect(-w - 3, 6, 2 * w + 6, 6);
+    ctx.fillStyle = "#6b4a2a"; ctx.fillRect(-w, 7, 2 * w, 4);
+    ctx.restore();
+  }
+
+  function drawBee(x, y, ang, c) {
+    const bob = Math.sin(t * 12 + x * 0.3) * 1.6;
+    ctx.save(); ctx.translate(x, y + bob); ctx.rotate(ang - Math.PI / 2);
+    const flap = Math.sin(t * 46) * 0.35;
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    ctx.beginPath(); ctx.ellipse(-9, -3, 8, 5, -0.6 + flap, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(9, -3, 8, 5, 0.6 - flap, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(0, 0, 9, 12, 0, 0, Math.PI * 2);
+    ctx.lineWidth = 6; ctx.strokeStyle = "#ffffff"; ctx.stroke();
+    ctx.fillStyle = c; ctx.fill();
+    ctx.save(); ctx.clip();
+    ctx.fillStyle = "rgba(30,15,0,0.85)"; ctx.fillRect(-10, -3, 20, 3.5); ctx.fillRect(-10, 4, 20, 3.5);
+    ctx.restore();
+    circle(ctx, 0, 12, 5.5, "#2a1a00", "#ffffff", 2);
+    ctx.restore();
+  }
+
+  function drawHud() {
+    ctx.fillStyle = "rgba(10,25,35,0.55)";
+    ctx.beginPath(); ctx.roundRect(16, 14, 328, 34, 17); ctx.fill();
+    ctx.font = "600 17px Fredoka, sans-serif"; ctx.fillStyle = "#fff4d6"; ctx.textAlign = "left";
+    ctx.fillText("Bee Line", 32, 37);
+    ctx.textAlign = "right";
+    ctx.fillText(`Home ${right} of ${total}`, 328, 37);
+  }
+
+  canvas.addEventListener("pointerdown", (ev) => {
+    const r = canvas.getBoundingClientRect();
+    const x = (ev.clientX - r.left) * W / r.width, y = (ev.clientY - r.top) * H / r.height;
+    let best = null, bestD = 40;
+    for (const id of SW) { const d = Math.hypot(x - NODES[id][0], y - NODES[id][1]); if (d < bestD) { best = id; bestD = d; } }
+    if (best) { state[best] ^= 1; bump[best] = 1; }
+  });
+
+  function step(dt) {
+    spawnIn -= dt;
+    if (spawnIn <= 0) { spawnIn = gap + Math.random() * 0.6; movers.push({ edge: "src>j1", d: 0, c: Math.floor(Math.random() * 8) }); }
+    for (const m of movers) {
+      m.d += speed * dt;
+      let e = edges[m.edge];
+      while (!m.done && m.d >= e.total) {
+        m.d -= e.total;
+        if (outs[e.to]) { m.edge = outs[e.to][state[e.to]]; e = edges[m.edge]; }
+        else {
+          m.done = true; total++;
+          const i = +e.to[1], ok = i === m.c;
+          if (ok) right++;
+          pops.push({ x: GOAL_X[i], y: GOAL_Y[i] - 44, ok, life: 1 });
+        }
+      }
+    }
+    movers = movers.filter((m) => !m.done);
+    pops = pops.filter((p) => (p.life -= dt, p.y -= 22 * dt, p.life > 0));
+    for (const id in bump) bump[id] = Math.max(0, bump[id] - dt * 6);
+  }
+
+  function draw() {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(scenery, 0, 0);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawTrails(reachable(), activePath());
+    for (let i = 0; i < 8; i++) drawHive(i);
+    for (const id of SW) drawSwitch(id);
+    for (const m of movers) { const [x, y, a] = along(edges[m.edge], m.d); drawBee(x, y, a, COLORS[m.c]); }
+    ctx.font = "700 26px Fredoka, sans-serif"; ctx.textAlign = "center";
+    for (const p of pops) { ctx.globalAlpha = Math.min(1, p.life * 1.5); ctx.fillStyle = p.ok ? "#7dffb0" : "#ff6b7a"; ctx.fillText(p.ok ? "✓" : "✗", p.x, p.y); }
+    ctx.globalAlpha = 1;
+    drawHud();
+  }
+
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now; t += dt;
+    step(dt); draw();
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  const speeds = { slow: [32, 2.8], normal: [44, 2.2], fast: [62, 1.5] };
+  for (const id in speeds) document.getElementById(id).addEventListener("click", () => {
+    [speed, gap] = speeds[id];
+    for (const k in speeds) document.getElementById(k).classList.toggle("on", k === id);
+  });
+})();
+</script>
+</body>
+</html>
