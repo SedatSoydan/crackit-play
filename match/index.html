@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex, nofollow">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Same or not themes</title>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #14172b; --text: #f4f1ec; --muted: #9ba3be; --accent: #ffb23e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 1240px; margin: 0 auto; padding: 28px 16px 60px; }
+  .intro { max-width: 640px; margin: 0 auto 28px; }
+  .intro h1 { margin: 0 0 6px; font-size: 26px; }
+  .intro p { color: var(--muted); margin: 0 0 10px; }
+  .grid { display: flex; flex-wrap: wrap; gap: 36px 28px; justify-content: center; }
+  figure { margin: 0; width: 360px; max-width: 100%; }
+  figcaption b { display: block; font-size: 20px; color: var(--accent); }
+  figcaption span { color: var(--muted); font-size: 15px; display: block; margin-bottom: 4px; }
+  figcaption ul { color: var(--muted); font-size: 14px; margin: 4px 0 12px; padding-left: 18px; }
+  .phone { width: 360px; max-width: 100%; border-radius: 28px; overflow: hidden; box-shadow: 0 0 0 8px #000; touch-action: manipulation; user-select: none; }
+  canvas { display: block; width: 100%; height: auto; cursor: pointer; }
+  .tip { text-align: center; color: var(--muted); font-size: 14px; margin-top: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="intro">
+    <h1>1B.6 "aynı mı değil mi" oyunu: tema taslakları</h1>
+    <p>Mekanik aynı: bir kart gelir, bir öncekiyle <b>aynı mı</b>? Hızlıca <b>SAME</b> ya da <b>NOT</b>. 60 saniye; doğru cevaplar arka arkaya gelince puan katlanır (×2, ×3 ...), yanlış seriyi sıfırlar.</p>
+    <p>İleri seviyelerde: iki önceki kartla karşılaştırma, sonra iki sıra birden. Her taslak oynanabilir: ilk kartı ezberle, sonra cevapla. Bilgisayarda ← NOT, → SAME.</p>
+  </div>
+
+  <div class="grid">
+    <figure>
+      <figcaption><b>A · Sushi Snap</b><span>Bir suşi bandı akar. Her tabak bir öncekiyle aynı mı? Tabak geçince kapağı kapanır, sadece hafızanda kalır.</span>
+        <ul><li>Neşeli, iştah açıcı; sıcak ahşap ve kırmızı</li><li>Ses: tabak tıkırtısı, doğruda "ding"</li><li>Benzer tabaklar zorlaştırır (somon / ton)</li></ul></figcaption>
+      <div class="phone"><canvas data-theme="sushi" width="360" height="640"></canvas></div>
+    </figure>
+
+    <figure>
+      <figcaption><b>B · Post Haste</b><span>Postanede mektuplar hızla geçer. Bu puldaki resim bir önceki pulla aynı mı? Damga vurur gibi cevap verirsin.</span>
+        <ul><li>Düzenli, kâğıt dokulu; krem ve lacivert</li><li>Ses: damga "küt", doğruda zil</li><li>Cevap = mektuba damga: SAME yeşil, NOT kırmızı</li></ul></figcaption>
+      <div class="phone"><canvas data-theme="stamps" width="360" height="640"></canvas></div>
+    </figure>
+
+    <figure>
+      <figcaption><b>C · Tide Pool</b><span>Dalgalar kıyıya deniz kabuğu bırakır. Bu kabuk bir öncekiyle aynı mı? Dalga geri çekilince önceki kabuk kumda kaybolur.</span>
+        <ul><li>Sakin ama hızlı; turkuaz su, kum</li><li>Ses: dalga hışırtısı, doğruda baloncuk</li><li>Benzer kabuklar ve renkler zorlaştırır</li></ul></figcaption>
+      <div class="phone"><canvas data-theme="shells" width="360" height="640"></canvas></div>
+    </figure>
+  </div>
+  <p class="tip">Taslakta seviye yok: hep "bir önceki kart". Gerçek oyunda seviyeler, en iyi skor ve günlük antrenman olacak.</p>
+</main>
+
+<script>
+(() => {
+  const W = 360, H = 640, ROUND = 60;
+  function rr(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+  }
+  function circle(ctx, x, y, r, fill, line, w) {
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+    if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+    if (line) { ctx.strokeStyle = line; ctx.lineWidth = w || 2; ctx.stroke(); }
+  }
+  function star(ctx, x, y, r, inner, points, fill) {
+    ctx.beginPath();
+    for (let i = 0; i < points * 2; i++) {
+      const rad = i % 2 ? r * inner : r, a = -Math.PI / 2 + i * Math.PI / points;
+      ctx.lineTo(x + Math.cos(a) * rad, y + Math.sin(a) * rad);
+    }
+    ctx.closePath(); ctx.fillStyle = fill; ctx.fill();
+  }
+
+  const THEMES = {
+    sushi: {
+      kinds: 6,
+      ui: { bg: "#3a1e14", ink: "#fff3e0", muted: "#e0b896", same: "#2fbf71", not: "#e5484d", panel: "rgba(0,0,0,0.25)" },
+      bg(ctx, t) {
+        const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, "#5a2e1d"); g.addColorStop(1, "#2c140c");
+        ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+        // Noren curtain.
+        for (let i = 0; i < 4; i++) { rr(ctx, 12 + i * 86, -20, 78, 92, 10); ctx.fillStyle = i % 2 ? "#b8322f" : "#c63c38"; ctx.fill(); }
+        ctx.fillStyle = "#fff3e0"; ctx.font = "600 20px Fredoka, sans-serif"; ctx.textAlign = "center"; ctx.fillText("SUSHI", 180, 50);
+        // The belt.
+        rr(ctx, -20, 250, 400, 130, 20); ctx.fillStyle = "#6b7280"; ctx.fill();
+        rr(ctx, -20, 262, 400, 106, 14); ctx.fillStyle = "#9aa3ad"; ctx.fill();
+        ctx.strokeStyle = "rgba(0,0,0,0.15)"; ctx.lineWidth = 2;
+        for (let x = -40 + ((t * 120) % 40); x < W + 40; x += 40) { ctx.beginPath(); ctx.moveTo(x, 262); ctx.lineTo(x, 368); ctx.stroke(); }
+        rr(ctx, -20, 380, 400, 18, 6); ctx.fillStyle = "#c8a27a"; ctx.fill();
+      },
+      cover(ctx, x, y, s) {
+        ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+        ctx.beginPath(); ctx.ellipse(0, 4, 54, 16, 0, 0, Math.PI * 2); ctx.fillStyle = "rgba(0,0,0,0.25)"; ctx.fill();
+        ctx.beginPath(); ctx.moveTo(-50, 6); ctx.bezierCurveTo(-50, -56, 50, -56, 50, 6); ctx.closePath();
+        ctx.fillStyle = "rgba(220,235,245,0.92)"; ctx.fill(); ctx.strokeStyle = "#9fb4c4"; ctx.lineWidth = 2; ctx.stroke();
+        circle(ctx, 0, -38, 6, "#9fb4c4");
+        ctx.restore();
+      },
+      item(ctx, k, x, y, s) {
+        ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+        ctx.beginPath(); ctx.ellipse(0, 6, 56, 20, 0, 0, Math.PI * 2); ctx.fillStyle = "rgba(0,0,0,0.25)"; ctx.fill();
+        ctx.beginPath(); ctx.ellipse(0, 0, 56, 20, 0, 0, Math.PI * 2); ctx.fillStyle = ["#ffffff", "#ffffff", "#2f6fdb", "#ffffff", "#e5484d", "#2f6fdb"][k]; ctx.fill();
+        ctx.beginPath(); ctx.ellipse(0, -2, 44, 14, 0, 0, Math.PI * 2); ctx.strokeStyle = "rgba(0,0,0,0.12)"; ctx.lineWidth = 2; ctx.stroke();
+        const rice = "#fbf7ef";
+        if (k <= 2) {
+          // Nigiri: rice and a topping (salmon, tuna, egg).
+          rr(ctx, -30, -24, 60, 22, 11); ctx.fillStyle = rice; ctx.fill();
+          const top = ["#ff8a4c", "#d7263d", "#ffd23f"][k];
+          ctx.beginPath(); ctx.ellipse(0, -26, 34, 12, 0, 0, Math.PI * 2); ctx.fillStyle = top; ctx.fill();
+          if (k === 0) { ctx.strokeStyle = "rgba(255,255,255,0.7)"; ctx.lineWidth = 2; for (const dx of [-14, 0, 14]) { ctx.beginPath(); ctx.moveTo(dx - 6, -34); ctx.lineTo(dx + 6, -20); ctx.stroke(); } }
+          if (k === 2) { rr(ctx, -6, -40, 12, 30, 3); ctx.fillStyle = "#1f2a24"; ctx.fill(); }
+        } else {
+          // Maki rolls: two side by side (cucumber, tuna, salmon).
+          for (const dx of [-18, 18]) {
+            circle(ctx, dx, -16, 16, "#1f2a24"); circle(ctx, dx, -16, 12, rice);
+            circle(ctx, dx, -16, 5, ["#3fbf5f", "#d7263d", "#ff8a4c"][k - 3]);
+          }
+        }
+        ctx.restore();
+      },
+      itemY: 300,
+      scale: 1.7,
+    },
+    stamps: {
+      kinds: 6,
+      ui: { bg: "#efe6d2", ink: "#1f2a4a", muted: "#6b6a7a", same: "#2f9e5b", not: "#d0453f", panel: "rgba(31,42,74,0.08)" },
+      bg(ctx) {
+        ctx.fillStyle = "#efe6d2"; ctx.fillRect(0, 0, W, H);
+        ctx.strokeStyle = "rgba(31,42,74,0.06)"; ctx.lineWidth = 1;
+        for (let y = 0; y < H; y += 22) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+        rr(ctx, 0, 0, W, 86, 0); ctx.fillStyle = "#1f2a4a"; ctx.fill();
+        for (let i = 0; i < 18; i++) { ctx.fillStyle = i % 2 ? "#d0453f" : "#2f6fdb"; ctx.beginPath(); ctx.moveTo(i * 22, 86); ctx.lineTo(i * 22 + 11, 86); ctx.lineTo(i * 22 + 2, 96); ctx.lineTo(i * 22 - 9, 96); ctx.fill(); }
+        ctx.fillStyle = "#efe6d2"; ctx.font = "700 22px Fredoka, sans-serif"; ctx.textAlign = "center"; ctx.fillText("POST", 180, 52);
+      },
+      envelope(ctx, x, y, s) {
+        ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+        rr(ctx, -110, -72, 220, 144, 8); ctx.fillStyle = "#fffaf0"; ctx.fill(); ctx.strokeStyle = "#cbbf9f"; ctx.lineWidth = 2; ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(-110, -72); ctx.lineTo(0, 6); ctx.lineTo(110, -72); ctx.strokeStyle = "#e2d8bf"; ctx.stroke();
+        for (let i = 0; i < 3; i++) { rr(ctx, -90, 20 + i * 14, 110 - i * 20, 6, 3); ctx.fillStyle = "#d9cfb6"; ctx.fill(); }
+        ctx.restore();
+      },
+      cover(ctx, x, y, s) {
+        this.envelope(ctx, x, y, s);
+        ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+        rr(ctx, 30, -60, 66, 78, 4); ctx.fillStyle = "#e2d8bf"; ctx.fill();
+        ctx.restore();
+      },
+      item(ctx, k, x, y, s) {
+        this.envelope(ctx, x, y, s);
+        ctx.save(); ctx.translate(x + 63 * s, y - 21 * s); ctx.scale(s, s);
+        // The stamp with perforated edges.
+        ctx.fillStyle = "#fff"; ctx.fillRect(-36, -42, 72, 84);
+        ctx.fillStyle = "#fffaf0";
+        for (let i = -36; i <= 36; i += 9) { circle(ctx, i, -42, 3, "#fffaf0"); circle(ctx, i, 42, 3, "#fffaf0"); }
+        for (let j = -42; j <= 42; j += 9) { circle(ctx, -36, j, 3, "#fffaf0"); circle(ctx, 36, j, 3, "#fffaf0"); }
+        const back = ["#ffe1e1", "#fff3c4", "#dbeafe", "#dcfce7", "#ede4ff", "#ffe8d6"][k];
+        ctx.fillStyle = back; ctx.fillRect(-28, -34, 56, 68);
+        const c = ["#d0453f", "#e0a100", "#2f6fdb", "#2f9e5b", "#7c4dff", "#f2711c"][k];
+        if (k === 0) { ctx.beginPath(); ctx.moveTo(0, 14); ctx.bezierCurveTo(-26, -4, -14, -24, 0, -10); ctx.bezierCurveTo(14, -24, 26, -4, 0, 14); ctx.fillStyle = c; ctx.fill(); }
+        if (k === 1) star(ctx, 0, -2, 20, 0.45, 5, c);
+        if (k === 2) { circle(ctx, 0, -2, 18, c); circle(ctx, 8, -8, 16, back); }
+        if (k === 3) { ctx.beginPath(); ctx.ellipse(0, -2, 10, 20, 0.6, 0, Math.PI * 2); ctx.fillStyle = c; ctx.fill(); }
+        if (k === 4) { ctx.beginPath(); ctx.moveTo(-18, 4); ctx.lineTo(0, -16); ctx.lineTo(18, 4); ctx.lineTo(0, -2); ctx.closePath(); ctx.fillStyle = c; ctx.fill(); }
+        if (k === 5) { circle(ctx, 0, -2, 11, c); for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4; ctx.strokeStyle = c; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(Math.cos(a) * 15, -2 + Math.sin(a) * 15); ctx.lineTo(Math.cos(a) * 21, -2 + Math.sin(a) * 21); ctx.stroke(); } }
+        ctx.restore();
+      },
+      itemY: 300,
+    },
+    shells: {
+      kinds: 6,
+      ui: { bg: "#e9d7ae", ink: "#14404a", muted: "#5d7a7c", same: "#1aa37a", not: "#e25555", panel: "rgba(20,64,74,0.1)" },
+      bg(ctx, t) {
+        const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, "#1aa6b7"); g.addColorStop(0.32, "#5fd0d9"); g.addColorStop(0.36, "#f1e2bc"); g.addColorStop(1, "#e2c995");
+        ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = "rgba(255,255,255,0.75)";
+        const yy = 200 + Math.sin(t * 1.4) * 10;
+        ctx.beginPath(); ctx.moveTo(0, yy);
+        for (let x = 0; x <= W; x += 20) ctx.lineTo(x, yy + Math.sin(x * 0.06 + t * 2) * 6);
+        ctx.lineTo(W, yy + 18); ctx.lineTo(0, yy + 18); ctx.fill();
+        for (let i = 0; i < 40; i++) circle(ctx, (i * 83) % W, 260 + (i * 47) % 380, 1.6, "rgba(120,90,40,0.25)");
+      },
+      cover(ctx, x, y, s) {
+        ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+        ctx.beginPath(); ctx.ellipse(0, 10, 60, 22, 0, 0, Math.PI * 2); ctx.fillStyle = "rgba(160,120,60,0.35)"; ctx.fill();
+        ctx.beginPath(); ctx.ellipse(0, 4, 46, 16, 0, 0, Math.PI * 2); ctx.fillStyle = "#e8d3a3"; ctx.fill();
+        ctx.restore();
+      },
+      item(ctx, k, x, y, s) {
+        ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+        ctx.beginPath(); ctx.ellipse(0, 30, 48, 12, 0, 0, Math.PI * 2); ctx.fillStyle = "rgba(120,90,40,0.25)"; ctx.fill();
+        const c = ["#ff9b85", "#f7c873", "#ff7aa8", "#f2f2f2", "#9b7bff", "#ff8a3d"][k];
+        if (k === 0 || k === 2) {
+          // Scallop fan.
+          for (let i = 0; i < 7; i++) {
+            const a = -Math.PI + 0.25 + i * (Math.PI - 0.5) / 6;
+            ctx.beginPath(); ctx.moveTo(0, 22); ctx.lineTo(Math.cos(a - 0.2) * 48, 22 + Math.sin(a - 0.2) * 48); ctx.lineTo(Math.cos(a + 0.2) * 48, 22 + Math.sin(a + 0.2) * 48); ctx.closePath();
+            ctx.fillStyle = i % 2 ? c : shade(c); ctx.fill();
+          }
+          rr(ctx, -12, 18, 24, 12, 4); ctx.fillStyle = shade(c); ctx.fill();
+        } else if (k === 1 || k === 5) {
+          star(ctx, 0, 0, 44, 0.42, 5, c);
+          for (let i = 0; i < 5; i++) { const a = -Math.PI / 2 + i * 2 * Math.PI / 5; circle(ctx, Math.cos(a) * 22, Math.sin(a) * 22, 3, shade(c)); }
+        } else {
+          // Spiral snail shell.
+          ctx.beginPath(); ctx.ellipse(0, 4, 40, 30, -0.2, 0, Math.PI * 2); ctx.fillStyle = c; ctx.fill();
+          ctx.strokeStyle = shade(c); ctx.lineWidth = 5; ctx.beginPath();
+          for (let a = 0; a < Math.PI * 5; a += 0.2) { const r = 3 + a * 2.3; ctx.lineTo(Math.cos(a) * r, 2 + Math.sin(a) * r * 0.8); }
+          ctx.stroke();
+        }
+        ctx.restore();
+      },
+      itemY: 340,
+      scale: 1.5,
+    },
+  };
+  function shade(hex) {
+    const n = parseInt(hex.slice(1), 16);
+    const r = (n >> 16) * 0.75, g = ((n >> 8) & 255) * 0.75, b = (n & 255) * 0.75;
+    return `rgb(${r | 0},${g | 0},${b | 0})`;
+  }
+
+  function game(canvas) {
+    const theme = THEMES[canvas.dataset.theme];
+    const ui = theme.ui;
+    const ctx = canvas.getContext("2d");
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    let seq = [], slide = 1, time = ROUND, score = 0, streak = 0, right = 0, wrong = 0;
+    let started = false, over = false, flash = null, t = 0, last = performance.now();
+    const next = () => {
+      const prev = seq[seq.length - 1];
+      if (prev !== undefined && Math.random() < 0.42) return prev;
+      let k; do { k = Math.floor(Math.random() * theme.kinds); } while (k === prev);
+      return k;
+    };
+    function reset() { seq = [next()]; slide = 1; time = ROUND; score = 0; streak = 0; right = 0; wrong = 0; started = false; over = false; flash = null; }
+    reset();
+
+    function answer(same) {
+      if (over) { reset(); return; }
+      if (!started) { started = true; seq.push(next()); slide = 0; return; }
+      if (slide < 0.6) return;
+      const truth = seq[seq.length - 1] === seq[seq.length - 2];
+      const ok = truth === same;
+      if (ok) { streak++; right++; score += 10 * Math.min(1 + Math.floor(streak / 4), 5); }
+      else { streak = 0; wrong++; }
+      flash = { ok, life: 0.5 };
+      seq.push(next()); slide = 0;
+    }
+    function buttons() { return { not: [24, 520, 148, 84], same: [188, 520, 148, 84] }; }
+    canvas.addEventListener("pointerdown", (ev) => {
+      const r = canvas.getBoundingClientRect();
+      const x = (ev.clientX - r.left) * W / r.width, y = (ev.clientY - r.top) * H / r.height;
+      const b = buttons();
+      if (!started || over) { answer(true); return; }
+      for (const key of ["not", "same"]) { const [bx, by, bw, bh] = b[key]; if (x >= bx && x <= bx + bw && y >= by && y <= by + bh) answer(key === "same"); }
+    });
+    canvas.addEventListener("keydown", () => {});
+    window.addEventListener("keydown", (ev) => {
+      if (document.activeElement !== document.body) return;
+      if (canvas !== active) return;
+      if (ev.key === "ArrowLeft") answer(false);
+      if (ev.key === "ArrowRight") answer(true);
+    });
+    canvas.addEventListener("pointerenter", () => active = canvas);
+
+    function draw() {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      theme.bg.call(theme, ctx, t);
+      const y = theme.itemY;
+      const e = 1 - Math.pow(1 - Math.min(1, slide), 3);
+      // The previous card leaves to the left, covered; the new one comes in from the right.
+      const sc = theme.scale || 1;
+      if (seq.length >= 2 && slide < 1) theme.cover.call(theme, ctx, 180 - 300 * e, y, sc);
+      if (seq.length >= 2) theme.item.call(theme, ctx, seq[seq.length - 1], 180 + 300 * (1 - e), y, sc);
+      else theme.item.call(theme, ctx, seq[0], 180, y, sc);
+      // HUD.
+      ctx.textAlign = "left"; ctx.font = "600 18px Fredoka, sans-serif";
+      rr(ctx, 16, 116, 328, 40, 20); ctx.fillStyle = ui.panel; ctx.fill();
+      ctx.fillStyle = ui.ink; ctx.fillText(`⏱ ${Math.ceil(time)}`, 32, 142);
+      ctx.textAlign = "center"; ctx.fillText(`×${Math.min(1 + Math.floor(streak / 4), 5)}`, 180, 142);
+      ctx.textAlign = "right"; ctx.fillText(`${score}`, 328, 142);
+      ctx.textAlign = "center"; ctx.font = "600 17px Fredoka, sans-serif"; ctx.fillStyle = ui.muted;
+      const prompt = over ? `Bitti: ${right} doğru, ${wrong} yanlış · dokun, yeniden` : !started ? "Bunu ezberle, sonra dokun" : "Bir öncekiyle aynı mı?";
+      ctx.fillText(prompt, 180, 470);
+      if (flash) {
+        ctx.globalAlpha = Math.max(0, flash.life * 2);
+        ctx.font = "700 44px Fredoka, sans-serif"; ctx.fillStyle = flash.ok ? ui.same : ui.not;
+        ctx.fillText(flash.ok ? "✓" : "✗", 180, y - 70);
+        ctx.globalAlpha = 1;
+      }
+      const b = buttons();
+      for (const key of ["not", "same"]) {
+        const [bx, by, bw, bh] = b[key];
+        const c = key === "same" ? ui.same : ui.not;
+        rr(ctx, bx, by + 6, bw, bh, 22); ctx.fillStyle = "rgba(0,0,0,0.25)"; ctx.fill();
+        rr(ctx, bx, by, bw, bh, 22); ctx.fillStyle = started && !over ? c : "rgba(128,128,128,0.45)"; ctx.fill();
+        ctx.fillStyle = "#fff"; ctx.font = "700 28px Fredoka, sans-serif"; ctx.fillText(key === "same" ? "SAME" : "NOT", bx + bw / 2, by + 54);
+      }
+    }
+    function frame(now) {
+      const dt = Math.min(0.05, (now - last) / 1000); last = now; t += dt;
+      if (started && !over) { time -= dt; if (time <= 0) { time = 0; over = true; } }
+      slide = Math.min(1, slide + dt * 4);
+      if (flash) { flash.life -= dt; if (flash.life <= 0) flash = null; }
+      draw();
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  }
+  let active = null;
+  document.querySelectorAll("canvas[data-theme]").forEach(game);
+})();
+</script>
+</body>
+</html>
