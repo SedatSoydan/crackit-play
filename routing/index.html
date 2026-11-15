@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex, nofollow">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Routing game themes</title>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #14172b; --text: #f4f1ec; --muted: #9ba3be; --accent: #ffb23e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 1240px; margin: 0 auto; padding: 28px 16px 60px; }
+  .intro { max-width: 620px; margin: 0 auto 28px; }
+  .intro h1 { margin: 0 0 6px; font-size: 26px; }
+  .intro p { color: var(--muted); margin: 0 0 10px; }
+  .grid { display: flex; flex-wrap: wrap; gap: 36px 28px; justify-content: center; }
+  figure { margin: 0; width: 360px; max-width: 100%; }
+  figcaption b { display: block; font-size: 20px; color: var(--accent); }
+  figcaption span { color: var(--muted); font-size: 15px; display: block; margin-bottom: 4px; }
+  figcaption ul { color: var(--muted); font-size: 14px; margin: 4px 0 12px; padding-left: 18px; }
+  .phone { width: 360px; max-width: 100%; border-radius: 28px; overflow: hidden; box-shadow: 0 0 0 8px #000; touch-action: manipulation; }
+  canvas { display: block; width: 100%; height: auto; cursor: pointer; }
+  .tip { text-align: center; color: var(--muted); font-size: 14px; margin-top: 10px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="intro">
+    <h1>1B.5 yönlendirme oyunu: tema taslakları</h1>
+    <p>Mekanik aynı: yukarıdan renkli bir şey gelir, makaslara dokunarak yolunu değiştirirsin, kendi rengindeki hedefe varmalı. İleri seviyelerde daha çok makas, daha çok renk, daha hızlı akış.</p>
+    <p>Her taslak oynanabilir: makaslara (yuvarlak düğümlere) dokun. Tren, ray, istasyon yok; ad, tema ve çizimler bizim.</p>
+  </div>
+
+  <div class="grid">
+    <figure>
+      <figcaption><b>A · Bee Line</b><span>Arılar çiçek polenini kovanlara taşır. Makaslar birer papatya; dokununca yaprakları diğer yola döner. Hedefler renkli kovan petekleri.</span>
+        <ul><li>Sıcak, sevimli; yeşil çayır</li><li>Ses: vızıltı, kovanda "plop"</li><li>Akış hissi: arılar uçuşur, hafif salınır</li></ul></figcaption>
+      <div class="phone"><canvas data-theme="bees" width="360" height="560"></canvas></div>
+    </figure>
+
+    <figure>
+      <figcaption><b>B · Canal Post</b><span>Kâğıt kayıklar kanallarda yüzer. Makaslar ahşap kanal kapakları; dokununca kapak öbür kanalı açar. Hedefler renkli bayraklı iskeleler.</span>
+        <ul><li>Sakin, temiz; mavi su, taş kenarlar</li><li>Ses: su şıpırtısı, iskelede çan</li><li>Paper Flock'un kâğıt diliyle akraba</li></ul></figcaption>
+      <div class="phone"><canvas data-theme="boats" width="360" height="560"></canvas></div>
+    </figure>
+
+    <figure>
+      <figcaption><b>C · Tumble Run</b><span>Cam bilyeler ahşap bir oluktan yuvarlanır. Makaslar küçük kollar; dokununca kol öbür oluğa yatar. Hedefler renkli kupalar.</span>
+        <ul><li>Oyuncaklı, parlak; sıcak ahşap</li><li>Ses: tıkırtı, kupada "tink"</li><li>Bilyeler hızlandıkça gerilim artar</li></ul></figcaption>
+      <div class="phone"><canvas data-theme="marbles" width="360" height="560"></canvas></div>
+    </figure>
+  </div>
+  <p class="tip">Doğru hedef ✓, yanlış hedef ✗ sayılır. Gerçek oyunda süre, seviye ve seri de olacak.</p>
+</main>
+
+<script>
+(() => {
+  // The track: a source at the top, three switches, four goals.
+  const EDGES = {
+    in: { pts: [[180, 34], [180, 132]], to: "j1" },
+    j1L: { pts: [[180, 132], [100, 200], [100, 244]], to: "j2" },
+    j1R: { pts: [[180, 132], [260, 200], [260, 244]], to: "j3" },
+    j2L: { pts: [[100, 244], [55, 304], [55, 436]], to: "g0" },
+    j2R: { pts: [[100, 244], [145, 304], [145, 436]], to: "g1" },
+    j3L: { pts: [[260, 244], [215, 304], [215, 436]], to: "g2" },
+    j3R: { pts: [[260, 244], [305, 304], [305, 436]], to: "g3" },
+  };
+  const SWITCHES = { j1: { pos: [180, 132], out: ["j1L", "j1R"] }, j2: { pos: [100, 244], out: ["j2L", "j2R"] }, j3: { pos: [260, 244], out: ["j3L", "j3R"] } };
+  const GOALS = { g0: [55, 470], g1: [145, 470], g2: [215, 470], g3: [305, 470] };
+  const GOAL_IDS = ["g0", "g1", "g2", "g3"];
+
+  for (const e of Object.values(EDGES)) {
+    e.len = [];
+    e.total = 0;
+    for (let i = 1; i < e.pts.length; i++) {
+      const l = Math.hypot(e.pts[i][0] - e.pts[i - 1][0], e.pts[i][1] - e.pts[i - 1][1]);
+      e.len.push(l);
+      e.total += l;
+    }
+  }
+  function along(e, d) {
+    let rest = d;
+    for (let i = 0; i < e.len.length; i++) {
+      const a = e.pts[i], b = e.pts[i + 1];
+      if (rest <= e.len[i] || i === e.len.length - 1) {
+        const t = Math.min(1, rest / e.len[i]);
+        return { x: a[0] + (b[0] - a[0]) * t, y: a[1] + (b[1] - a[1]) * t, ang: Math.atan2(b[1] - a[1], b[0] - a[0]) };
+      }
+      rest -= e.len[i];
+    }
+  }
+  function path(ctx, pts) {
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+  }
+  // The first stretch of a branch, to show where a switch points.
+  function stub(e, len) {
+    const out = [e.pts[0]];
+    let rest = len;
+    for (let i = 0; i < e.len.length && rest > 0; i++) {
+      const a = e.pts[i], b = e.pts[i + 1];
+      const t = Math.min(1, rest / e.len[i]);
+      out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+      rest -= e.len[i];
+    }
+    return out;
+  }
+  function circle(ctx, x, y, r, fill, stroke, w) {
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+    if (stroke) { ctx.lineWidth = w || 2; ctx.strokeStyle = stroke; ctx.stroke(); }
+  }
+  function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  const THEMES = {
+    bees: {
+      colors: ["#ff5d73", "#3b82f6", "#9b5cff", "#ff9f1c"],
+      ink: "#2c4a1e",
+      bg(ctx, t) {
+        const g = ctx.createLinearGradient(0, 0, 0, 560);
+        g.addColorStop(0, "#bfe9ff"); g.addColorStop(0.28, "#d8f5c0"); g.addColorStop(1, "#8fd16a");
+        ctx.fillStyle = g; ctx.fillRect(0, 0, 360, 560);
+        for (let i = 0; i < 26; i++) {
+          const x = (i * 97) % 360, y = 180 + ((i * 53) % 330);
+          ctx.strokeStyle = "rgba(60,120,40,0.35)"; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - 3, y - 9); ctx.moveTo(x + 4, y); ctx.lineTo(x + 6, y - 8); ctx.stroke();
+        }
+        // The flower field the bees come from.
+        for (const [x, c] of [[150, "#fff"], [180, "#ffd1dc"], [210, "#fff"]]) {
+          for (let p = 0; p < 6; p++) {
+            const a = p * Math.PI / 3 + t * 0.4;
+            circle(ctx, x + Math.cos(a) * 7, 26 + Math.sin(a) * 7, 6, c);
+          }
+          circle(ctx, x, 26, 5, "#ffc21a");
+        }
+      },
+      edge(ctx, e, active) {
+        path(ctx, e.pts);
+        ctx.lineCap = "round"; ctx.lineJoin = "round";
+        ctx.setLineDash([2, 10]); ctx.lineWidth = 6; ctx.strokeStyle = active ? "#c47d00" : "rgba(160,110,20,0.45)"; ctx.stroke();
+        ctx.setLineDash([]);
+      },
+      sw(ctx, s, dir) {
+        const [x, y] = s.pos;
+        const tilt = dir ? 0.5 : -0.5;
+        for (let p = 0; p < 8; p++) {
+          const a = p * Math.PI / 4;
+          const long = Math.abs(Math.sin((a - Math.PI / 2 - tilt) / 2)) < 0.3;
+          ctx.save(); ctx.translate(x, y); ctx.rotate(a);
+          ctx.beginPath(); ctx.ellipse(16, 0, long ? 15 : 11, 7, 0, 0, Math.PI * 2);
+          ctx.fillStyle = long ? "#fff" : "#f4f4f4"; ctx.fill(); ctx.strokeStyle = "#d9d0c0"; ctx.lineWidth = 1.5; ctx.stroke();
+          ctx.restore();
+        }
+        circle(ctx, x, y, 12, "#ffc21a", "#c47d00", 3);
+        const ang = Math.PI / 2 + (dir ? -0.75 : 0.75);
+        ctx.strokeStyle = "#7a4b00"; ctx.lineWidth = 3; ctx.lineCap = "round";
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(ang) * 8, y + Math.sin(ang) * 8); ctx.stroke();
+      },
+      goal(ctx, x, y, c) {
+        ctx.beginPath();
+        for (let i = 0; i < 6; i++) {
+          const a = Math.PI / 6 + i * Math.PI / 3;
+          ctx.lineTo(x + Math.cos(a) * 30, y + Math.sin(a) * 30);
+        }
+        ctx.closePath(); ctx.fillStyle = "#ffd75e"; ctx.fill(); ctx.lineWidth = 4; ctx.strokeStyle = c; ctx.stroke();
+        circle(ctx, x, y + 2, 13, c);
+        circle(ctx, x, y + 4, 6, "#4a2a00");
+      },
+      mover(ctx, x, y, ang, c, t) {
+        const bob = Math.sin(t * 14 + x) * 2;
+        ctx.save(); ctx.translate(x, y + bob); ctx.rotate(ang - Math.PI / 2);
+        ctx.fillStyle = "rgba(255,255,255,0.8)";
+        ctx.beginPath(); ctx.ellipse(-9, -2, 8, 5, -0.5 + Math.sin(t * 40) * 0.3, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(9, -2, 8, 5, 0.5 - Math.sin(t * 40) * 0.3, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(0, 0, 8, 11, 0, 0, Math.PI * 2); ctx.fillStyle = c; ctx.fill();
+        ctx.lineWidth = 2.5; ctx.strokeStyle = "#2a1a00"; ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(-7, -2); ctx.lineTo(7, -2); ctx.moveTo(-7, 4); ctx.lineTo(7, 4); ctx.stroke();
+        circle(ctx, 0, 11, 5, "#2a1a00");
+        ctx.restore();
+      },
+    },
+    boats: {
+      colors: ["#ff5d5d", "#2f7cf6", "#ffc21a", "#22b573"],
+      ink: "#0f2a4a",
+      bg(ctx, t) {
+        ctx.fillStyle = "#cfe3c4"; ctx.fillRect(0, 0, 360, 560);
+        for (let i = 0; i < 40; i++) {
+          const x = (i * 71) % 360, y = (i * 113) % 560;
+          circle(ctx, x, y, 3, "rgba(120,160,100,0.35)");
+        }
+        roundRect(ctx, 150, 6, 60, 30, 10); ctx.fillStyle = "#7aa6c9"; ctx.fill();
+      },
+      edge(ctx, e, active) {
+        path(ctx, e.pts); ctx.lineCap = "round"; ctx.lineJoin = "round";
+        ctx.lineWidth = 30; ctx.strokeStyle = "#9b8f7f"; ctx.stroke();
+        ctx.lineWidth = 22; ctx.strokeStyle = active ? "#3f93d8" : "#78acd4"; ctx.stroke();
+        ctx.setLineDash([6, 14]); ctx.lineWidth = 2; ctx.strokeStyle = "rgba(255,255,255,0.55)"; ctx.stroke(); ctx.setLineDash([]);
+      },
+      sw(ctx, s, dir) {
+        const [x, y] = s.pos;
+        circle(ctx, x, y, 17, "#3f93d8", "#9b8f7f", 4);
+        // The gate lies across the closed canal.
+        const closed = dir ? Math.PI / 2 + 0.75 : Math.PI / 2 - 0.75;
+        ctx.save(); ctx.translate(x, y); ctx.rotate(closed);
+        roundRect(ctx, 6, -5, 26, 10, 3); ctx.fillStyle = "#a0642c"; ctx.fill(); ctx.strokeStyle = "#5e3712"; ctx.lineWidth = 2; ctx.stroke();
+        ctx.restore();
+        circle(ctx, x, y, 6, "#5e3712");
+      },
+      goal(ctx, x, y, c) {
+        roundRect(ctx, x - 30, y - 12, 60, 34, 6); ctx.fillStyle = "#c08a52"; ctx.fill(); ctx.strokeStyle = "#7a5126"; ctx.lineWidth = 3; ctx.stroke();
+        for (let i = -20; i <= 20; i += 10) { ctx.beginPath(); ctx.moveTo(x + i, y - 10); ctx.lineTo(x + i, y + 20); ctx.strokeStyle = "rgba(90,55,20,0.35)"; ctx.lineWidth = 1.5; ctx.stroke(); }
+        ctx.beginPath(); ctx.moveTo(x + 18, y - 10); ctx.lineTo(x + 18, y - 44); ctx.strokeStyle = "#5e3712"; ctx.lineWidth = 3; ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x + 18, y - 44); ctx.lineTo(x - 6, y - 37); ctx.lineTo(x + 18, y - 29); ctx.closePath(); ctx.fillStyle = c; ctx.fill();
+      },
+      mover(ctx, x, y, ang, c, t) {
+        const rock = Math.sin(t * 5 + x * 0.1) * 0.12;
+        ctx.save(); ctx.translate(x, y); ctx.rotate(ang - Math.PI / 2 + rock);
+        ctx.beginPath(); ctx.moveTo(-12, -6); ctx.lineTo(12, -6); ctx.lineTo(7, 9); ctx.lineTo(-7, 9); ctx.closePath();
+        ctx.fillStyle = c; ctx.fill(); ctx.strokeStyle = "rgba(0,0,0,0.35)"; ctx.lineWidth = 1.5; ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, -6); ctx.lineTo(0, -18); ctx.lineTo(10, -6); ctx.closePath(); ctx.fillStyle = "#fff"; ctx.fill(); ctx.stroke();
+        ctx.restore();
+      },
+    },
+    marbles: {
+      colors: ["#ff4f6a", "#2f7cf6", "#ffc21a", "#20c374"],
+      ink: "#3b2410",
+      bg(ctx) {
+        const g = ctx.createLinearGradient(0, 0, 360, 560);
+        g.addColorStop(0, "#f3d9b1"); g.addColorStop(1, "#e2b984");
+        ctx.fillStyle = g; ctx.fillRect(0, 0, 360, 560);
+        ctx.strokeStyle = "rgba(150,95,40,0.18)"; ctx.lineWidth = 2;
+        for (let y = 20; y < 560; y += 26) { ctx.beginPath(); ctx.moveTo(0, y); ctx.bezierCurveTo(120, y + 8, 240, y - 8, 360, y + 4); ctx.stroke(); }
+        // The funnel the marbles drop from.
+        ctx.beginPath(); ctx.moveTo(146, 4); ctx.lineTo(214, 4); ctx.lineTo(190, 34); ctx.lineTo(170, 34); ctx.closePath();
+        ctx.fillStyle = "#b5773a"; ctx.fill(); ctx.strokeStyle = "#7a4a1c"; ctx.lineWidth = 3; ctx.stroke();
+      },
+      edge(ctx, e, active) {
+        path(ctx, e.pts); ctx.lineCap = "round"; ctx.lineJoin = "round";
+        ctx.lineWidth = 24; ctx.strokeStyle = "#8a5426"; ctx.stroke();
+        ctx.lineWidth = 16; ctx.strokeStyle = active ? "#d99b5c" : "#b8814a"; ctx.stroke();
+        ctx.lineWidth = 4; ctx.strokeStyle = "rgba(255,255,255,0.25)"; ctx.stroke();
+      },
+      sw(ctx, s, dir) {
+        const [x, y] = s.pos;
+        circle(ctx, x, y, 16, "#d99b5c", "#7a4a1c", 3);
+        const toward = Math.PI / 2 + (dir ? -0.75 : 0.75);
+        // The lever leans away from the open side.
+        const lean = Math.PI / 2 + (dir ? 0.75 : -0.75);
+        ctx.save(); ctx.translate(x, y); ctx.rotate(lean);
+        roundRect(ctx, -2, -5, 28, 10, 5); ctx.fillStyle = "#e84a5f"; ctx.fill(); ctx.strokeStyle = "#9a2235"; ctx.lineWidth = 2; ctx.stroke();
+        ctx.restore();
+        circle(ctx, x, y, 7, "#ffd75e", "#9a6b00", 2);
+        ctx.fillStyle = "rgba(60,30,10,0.55)";
+        ctx.beginPath(); ctx.arc(x + Math.cos(toward) * 22, y + Math.sin(toward) * 22, 4, 0, Math.PI * 2); ctx.fill();
+      },
+      goal(ctx, x, y, c) {
+        ctx.beginPath(); ctx.moveTo(x - 28, y - 18); ctx.lineTo(x + 28, y - 18); ctx.lineTo(x + 20, y + 20); ctx.lineTo(x - 20, y + 20); ctx.closePath();
+        ctx.fillStyle = c; ctx.fill(); ctx.strokeStyle = "rgba(0,0,0,0.3)"; ctx.lineWidth = 3; ctx.stroke();
+        ctx.beginPath(); ctx.ellipse(x, y - 18, 28, 7, 0, 0, Math.PI * 2); ctx.fillStyle = "rgba(0,0,0,0.25)"; ctx.fill();
+        roundRect(ctx, x - 22, y + 20, 44, 8, 3); ctx.fillStyle = "#7a4a1c"; ctx.fill();
+      },
+      mover(ctx, x, y, ang, c, t) {
+        circle(ctx, x + 2, y + 3, 9, "rgba(60,30,10,0.25)");
+        const g = ctx.createRadialGradient(x - 3, y - 4, 1, x, y, 10);
+        g.addColorStop(0, "#fff"); g.addColorStop(0.35, c); g.addColorStop(1, c);
+        circle(ctx, x, y, 9, g, "rgba(0,0,0,0.35)", 1.5);
+        const spin = t * 9 + x * 0.2;
+        ctx.strokeStyle = "rgba(255,255,255,0.6)"; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(x, y, 5, spin, spin + 1.4); ctx.stroke();
+      },
+    },
+  };
+
+  function game(canvas) {
+    const theme = THEMES[canvas.dataset.theme];
+    const ctx = canvas.getContext("2d");
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    canvas.width = 360 * dpr; canvas.height = 560 * dpr;
+    const state = { j1: 0, j2: 0, j3: 1 };
+    const movers = [];
+    const pops = [];
+    let right = 0, wrong = 0, spawnIn = 0.6, last = performance.now(), t = 0;
+    const goalColor = {};
+    GOAL_IDS.forEach((id, i) => goalColor[id] = theme.colors[i]);
+
+    canvas.addEventListener("pointerdown", (ev) => {
+      const r = canvas.getBoundingClientRect();
+      const x = (ev.clientX - r.left) * 360 / r.width, y = (ev.clientY - r.top) * 560 / r.height;
+      for (const id in SWITCHES) {
+        const [sx, sy] = SWITCHES[id].pos;
+        if (Math.hypot(x - sx, y - sy) < 36) { state[id] ^= 1; break; }
+      }
+    });
+
+    function step(dt) {
+      spawnIn -= dt;
+      if (spawnIn <= 0) {
+        spawnIn = 2.1 + Math.random() * 0.8;
+        movers.push({ edge: "in", d: 0, color: Math.floor(Math.random() * 4) });
+      }
+      for (const m of movers) {
+        m.d += 46 * dt;
+        let e = EDGES[m.edge];
+        while (!m.done && m.d >= e.total) {
+          m.d -= e.total;
+          if (SWITCHES[e.to]) { m.edge = SWITCHES[e.to].out[state[e.to]]; e = EDGES[m.edge]; }
+          else {
+            m.done = true;
+            const ok = goalColor[e.to] === theme.colors[m.color];
+            ok ? right++ : wrong++;
+            pops.push({ x: GOALS[e.to][0], y: GOALS[e.to][1] - 46, ok, life: 1 });
+          }
+        }
+      }
+      for (let i = movers.length - 1; i >= 0; i--) if (movers[i].done) movers.splice(i, 1);
+      for (let i = pops.length - 1; i >= 0; i--) { pops[i].life -= dt; pops[i].y -= 20 * dt; if (pops[i].life <= 0) pops.splice(i, 1); }
+    }
+
+    function draw() {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      theme.bg(ctx, t);
+      const activeEdges = new Set(["in"]);
+      for (const id in SWITCHES) activeEdges.add(SWITCHES[id].out[state[id]]);
+      for (const k in EDGES) theme.edge(ctx, EDGES[k], false);
+      for (const id in SWITCHES) theme.edge(ctx, { pts: stub(EDGES[SWITCHES[id].out[state[id]]], 46) }, true);
+      for (const id of GOAL_IDS) theme.goal(ctx, GOALS[id][0], GOALS[id][1], goalColor[id]);
+      for (const id in SWITCHES) theme.sw(ctx, SWITCHES[id], state[id]);
+      for (const m of movers) {
+        const p = along(EDGES[m.edge], m.d);
+        theme.mover(ctx, p.x, p.y, p.ang, theme.colors[m.color], t);
+      }
+      ctx.font = "600 26px Fredoka, sans-serif"; ctx.textAlign = "center";
+      for (const p of pops) {
+        ctx.globalAlpha = Math.max(0, p.life);
+        ctx.fillStyle = p.ok ? "#14a35a" : "#e0344b";
+        ctx.fillText(p.ok ? "✓" : "✗", p.x, p.y);
+      }
+      ctx.globalAlpha = 1;
+      roundRect(ctx, 20, 512, 320, 36, 18); ctx.fillStyle = "rgba(255,255,255,0.85)"; ctx.fill();
+      ctx.font = "600 19px Fredoka, sans-serif"; ctx.fillStyle = theme.ink;
+      ctx.fillText(`✓ ${right}    ✗ ${wrong}    · makasa dokun`, 180, 537);
+    }
+
+    function frame(now) {
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now; t += dt;
+      step(dt); draw();
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  }
+  document.querySelectorAll("canvas[data-theme]").forEach(game);
+})();
+</script>
+</body>
+</html>
