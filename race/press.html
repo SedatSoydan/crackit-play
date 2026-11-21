@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex, nofollow">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Comet Cup one button</title>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #14172b; --text: #f4f1ec; --muted: #9ba3be; --accent: #ffb23e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 900px; margin: 0 auto; padding: 24px 16px 48px; }
+  .intro { max-width: 560px; margin: 0 auto 20px; }
+  .intro h1 { margin: 0 0 6px; font-size: 24px; }
+  .intro p, .intro li { color: var(--muted); margin: 0 0 6px; }
+  .intro ul { padding-left: 18px; margin: 6px 0 0; }
+  .phone { width: 360px; max-width: 100%; margin: 0 auto; border-radius: 30px; overflow: hidden; box-shadow: 0 0 0 8px #000; touch-action: none; user-select: none; -webkit-user-select: none; }
+  canvas { display: block; width: 100%; height: auto; cursor: pointer; }
+  .row { display: flex; gap: 10px; justify-content: center; margin-top: 14px; flex-wrap: wrap; }
+  button { font: 600 16px Fredoka, sans-serif; border: 0; border-radius: 14px; padding: 8px 16px; background: #2b3157; color: var(--text); cursor: pointer; }
+  button.on { background: var(--accent); color: #2a1a00; }
+</style>
+</head>
+<body>
+<main>
+  <div class="intro">
+    <h1>Comet Cup · tek düğme</h1>
+    <ul>
+      <li>Yarış hiç durmaz. Üstteki komutu oku, yarışı izle, <b>doğru anda</b> alttaki düğmeye bas.</li>
+      <li><b>PRESS · ⭐ takes the lead</b>: yıldız lider olduğu anda bas. Erken basarsan yanarsın.</li>
+      <li><b>PRESS · every overtake</b>: her sollamada bir kez bas. <b>HOLD</b>: o öndeyken basılı tut, liderliği kaybedince bırak.</li>
+      <li>Şaşırtmaca modunda: <b>"Crackit says"</b> yazmıyorsa hiç basma; "3rd overtake" için sollamaları kendin say.</li>
+      <li>3 can. Bilgisayarda boşluk tuşu da düğmedir.</li>
+    </ul>
+  </div>
+  <div class="phone"><canvas id="board" width="360" height="640"></canvas></div>
+  <div class="row"><button id="basic" class="on">Temel</button><button id="tricks">Şaşırtmacalı</button></div>
+</main>
+<script>
+(() => {
+  const W = 360, H = 640, TAU = Math.PI * 2;
+  const LANE_TOP = 214, LANE_H = 62, COUNT = 4;
+  const BUTTON = { x: 180, y: 556, r: 58 };
+  // A press counts for an event that happened up to GRACE seconds before it.
+  const GRACE = 0.9;
+  const PASS_GAP = 0.5;
+  const COLORS = ["#ff4d5e", "#3b8bff", "#ffc21a", "#22c55e"];
+  const SHAPES = ["star", "heart", "diamond", "circle"];
+  const NAMES = ["STAR", "HEART", "DIAMOND", "CIRCLE"];
+
+  function dot(c, x, y, r, f) { c.beginPath(); c.arc(x, y, r, 0, TAU); c.fillStyle = f; c.fill(); }
+  function rr(c, x, y, w, h, r) { c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); }
+  function shape(c, kind, x, y, r, fill, line) {
+    c.beginPath();
+    if (kind === "star") { for (let i = 0; i < 10; i++) { const rad = i % 2 ? r * 0.45 : r, a = -Math.PI / 2 + i * Math.PI / 5; c.lineTo(x + Math.cos(a) * rad, y + Math.sin(a) * rad); } }
+    else if (kind === "heart") { for (let i = 0; i < 40; i++) { const t = i * TAU / 40; c.lineTo(x + 16 * Math.pow(Math.sin(t), 3) * r / 17, y - (13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t)) * r / 17 + r * 0.1); } }
+    else if (kind === "diamond") { c.moveTo(x, y - r); c.lineTo(x + r * 0.75, y); c.lineTo(x, y + r); c.lineTo(x - r * 0.75, y); }
+    else { c.arc(x, y, r * 0.85, 0, TAU); }
+    c.closePath(); c.fillStyle = fill; c.fill();
+    if (line) { c.lineWidth = 3; c.strokeStyle = line; c.stroke(); }
+  }
+
+  const canvas = document.getElementById("board");
+  const c = canvas.getContext("2d");
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  const sky = Array.from({ length: 70 }, (_, i) => ({ x: (i * 97) % W, y: (i * 61) % H, r: 0.6 + (i % 3) * 0.5, v: 0.4 + (i % 4) * 0.3 }));
+  let tricks = false;
+  let lastPass = -9;
+  let racers, order, events, cmd, gap, lives, score, streak, done, started, over, down, downAt, feedback, t = 0, last = performance.now();
+
+  const mean = () => racers.reduce((s, r) => s + r.p, 0) / COUNT;
+  const rankNow = () => racers.slice().sort((a, b) => b.p - a.p).map((r) => r.i);
+  const mult = () => Math.min(1 + Math.floor(streak / 3), 5);
+  const screenX = (p) => Math.max(70, Math.min(318, 200 + (p - mean()) * 3.2));
+  const laneY = (i) => LANE_TOP + i * LANE_H + LANE_H / 2;
+
+  function reset() {
+    racers = Array.from({ length: COUNT }, (_, i) => ({ i, p: 20 - i * 7, v: 60, target: 60, retarget: Math.random(), boost: 0 }));
+    order = rankNow(); events = [];
+    cmd = null; gap = 1.4; lives = 3; score = 0; streak = 0; done = 0; started = false; over = false; down = false; feedback = null;
+  }
+
+  // --- Commands -------------------------------------------------------------
+  function newCommand() {
+    const kinds = ["lead", "lead", "every", "hold"];
+    if (tricks) kinds.push("count", "lead", "every");
+    const kind = kinds[Math.floor(Math.random() * kinds.length)];
+    // With tricks on, a card without "Crackit says" is a trap: do not press at all.
+    const trap = tricks && kind !== "hold" && Math.random() < 0.3;
+    const base = { kind, trap, says: tricks && !trap, start: t, presses: 0, seen: 0 };
+    if (kind === "lead") {
+      const choices = racers.map((r) => r.i).filter((i) => i !== order[0]);
+      const who = choices[Math.floor(Math.random() * choices.length)];
+      // Plan the overtake: the racer gets a boost after a short wait.
+      racers[who].boostAt = t + 1.2 + Math.random() * 1.6;
+      return { ...base, who, window: 7.0, top: "PRESS", line: "takes the lead" };
+    }
+    if (kind === "every") return { ...base, need: 3, window: 9.0, top: "PRESS", line: "on every overtake" };
+    if (kind === "count") return { ...base, need: 3, window: 10.0, top: "PRESS", line: "on the 3rd overtake" };
+    const who = order[0];
+    racers[who].fadeAt = t + 2.0 + Math.random() * 1.5;
+    return { ...base, who, window: 8.0, top: "HOLD", line: "while it leads", holding: false, armed: false };
+  }
+
+  function judge(ok, text) {
+    if (ok) { streak++; done++; score += 10 * mult(); }
+    else { streak = 0; lives--; if (lives <= 0) over = true; }
+    feedback = { ok, text, life: 1.0 };
+    cmd = null; gap = 1.1;
+    for (const r of racers) { r.boostAt = null; r.fadeAt = null; }
+  }
+  const recent = (kind, filter) => events.some((e) => e.kind === kind && t - e.t <= GRACE && (!filter || filter(e)));
+
+  function press() {
+    if (over) { reset(); return; }
+    if (!started) { started = true; return; }
+    if (!cmd) { feedback = { ok: false, text: "Wait for the order", life: 0.8 }; return; }
+    if (cmd.trap) { judge(false, "Crackit didn't say!"); return; }
+    if (cmd.kind === "lead") {
+      if (recent("lead", (e) => e.who === cmd.who)) judge(true, "Right on time!");
+      else judge(false, "Too early!");
+    } else if (cmd.kind === "every") {
+      if (recent("pass")) { cmd.presses++; feedback = { ok: true, text: `${cmd.presses} / ${cmd.need}`, life: 0.6 }; events = events.filter((e) => e.kind !== "pass"); if (cmd.presses >= cmd.need) judge(true, "Every one!"); }
+      else judge(false, "No overtake there!");
+    } else if (cmd.kind === "count") {
+      if (cmd.seen >= 3 && recent("pass")) judge(true, "Counted right!");
+      else judge(false, cmd.seen < 3 ? `Too early, that was ${Math.max(1, cmd.seen)}` : "Too late!");
+    } else if (cmd.kind === "hold") {
+      if (order[0] === cmd.who) { cmd.holding = true; cmd.armed = true; }
+      else judge(false, "It isn't leading");
+    }
+  }
+  function release() {
+    if (!cmd || cmd.kind !== "hold" || !cmd.holding) return;
+    cmd.holding = false;
+    if (order[0] === cmd.who) judge(false, "Let go too soon!");
+    else if (recent("lead")) judge(true, "Perfect release!");
+    else judge(false, "Let go too late!");
+  }
+
+  // --- Input: the big button, or the space bar ------------------------------
+  const inButton = (ev) => {
+    const r = canvas.getBoundingClientRect();
+    const x = (ev.clientX - r.left) * W / r.width, y = (ev.clientY - r.top) * H / r.height;
+    return Math.hypot(x - BUTTON.x, y - BUTTON.y) < BUTTON.r + 24 || !started || over;
+  };
+  canvas.addEventListener("pointerdown", (ev) => { if (!inButton(ev)) return; down = true; downAt = t; press(); canvas.setPointerCapture(ev.pointerId); });
+  canvas.addEventListener("pointerup", () => { if (down) { down = false; release(); } });
+  canvas.addEventListener("pointercancel", () => { if (down) { down = false; release(); } });
+  window.addEventListener("keydown", (ev) => { if (ev.code === "Space") { ev.preventDefault(); if (!ev.repeat) { down = true; press(); } } });
+  window.addEventListener("keyup", (ev) => { if (ev.code === "Space") { ev.preventDefault(); if (down) { down = false; release(); } } });
+
+  // --- Race -----------------------------------------------------------------
+  function step(dt) {
+    for (const r of racers) {
+      r.retarget -= dt;
+      if (r.retarget <= 0) { r.retarget = 0.7 + Math.random() * 1.0; r.target = 50 + Math.random() * 34; }
+      let goal = r.target + (mean() - r.p) * 0.55;
+      if (r.boostAt && t >= r.boostAt) goal += 46;
+      if (r.fadeAt && t >= r.fadeAt) goal -= 46;
+      r.v += (goal - r.v) * dt * 1.6;
+      r.p += r.v * dt * 0.5;
+    }
+    const now = rankNow();
+    if (now[0] !== order[0]) events.push({ kind: "lead", who: now[0], lost: order[0], t });
+    // Overtakes closer together than PASS_GAP count as one, so a quick
+    // double swap never asks for two presses.
+    for (let k = 0; k < COUNT; k++) if (now[k] !== order[k]) {
+      if (t - lastPass > PASS_GAP) { events.push({ kind: "pass", t }); lastPass = t; if (cmd && (cmd.kind === "count" || cmd.kind === "every")) cmd.seen++; }
+      break;
+    }
+    order = now;
+    events = events.filter((e) => t - e.t <= GRACE);
+    if (!started || over) return;
+    if (cmd) {
+      if (cmd.kind === "lead" && cmd.who === order[0] && racers[cmd.who].boostAt) racers[cmd.who].boostAt = null;
+      // A missed moment: the event passed its grace without a press.
+      if (cmd.kind === "lead" && !cmd.trap && events.length === 0 && order[0] === cmd.who && t - cmd.start > 1 && !cmd.pressedLate) {
+        const happened = !racers[cmd.who].boostAt;
+        if (happened && cmd.leadSeenAt && t - cmd.leadSeenAt > GRACE) { judge(false, "Missed it!"); return; }
+      }
+      if (cmd.kind === "lead" && order[0] === cmd.who && !cmd.leadSeenAt) cmd.leadSeenAt = t;
+      if (cmd.kind === "hold" && !cmd.armed && t - cmd.start > 1.6) { judge(false, "Hold it while it leads!"); return; }
+      if (cmd.kind === "hold" && cmd.holding && order[0] !== cmd.who && cmd.lostAt === undefined) cmd.lostAt = t;
+      if (cmd.kind === "hold" && cmd.holding && cmd.lostAt !== undefined && t - cmd.lostAt > GRACE) { cmd.holding = false; judge(false, "Let go too late!"); return; }
+      if (cmd.kind === "count" && cmd.seen > 3 && !cmd.trap) { judge(false, "Missed the 3rd!"); return; }
+      if (cmd.kind === "every" && !cmd.trap && cmd.seen > cmd.presses + 1) { judge(false, "Missed one!"); return; }
+      if (t - cmd.start > cmd.window) {
+        // A trap survived without a press is a win; anything else ran out.
+        if (cmd.trap) judge(true, "Good, Crackit didn't say!");
+        else if (cmd.kind === "lead" && cmd.leadSeenAt) judge(false, "Missed it!");
+        else { cmd = null; gap = 0.8; feedback = { ok: true, text: "Next!", life: 0.6 }; }
+      }
+    } else if (!over) {
+      gap -= dt; if (gap <= 0) cmd = newCommand();
+    }
+    if (feedback) { feedback.life -= dt; if (feedback.life <= 0) feedback = null; }
+  }
+
+  // --- Drawing --------------------------------------------------------------
+  function drawComet(r, x, y) {
+    const glow = cmd && cmd.who === r.i;
+    const g = c.createLinearGradient(x - 150, 0, x, 0);
+    g.addColorStop(0, "rgba(255,255,255,0)"); g.addColorStop(0.65, COLORS[r.i] + "88"); g.addColorStop(1, "#ffffffdd");
+    c.beginPath(); c.moveTo(x - 150, y); c.quadraticCurveTo(x - 60, y - 22, x, y - 17); c.lineTo(x, y + 17); c.quadraticCurveTo(x - 60, y + 22, x - 150, y); c.fillStyle = g; c.fill();
+    for (let i = 0; i < 4; i++) dot(c, x - 32 - i * 26 + Math.sin(t * 9 + i + r.i) * 3, y + Math.sin(t * 7 + i * 2 + r.i) * 7, 2, "rgba(255,255,255,0.7)");
+    dot(c, x, y, glow ? 28 : 24, COLORS[r.i] + (glow ? "66" : "44"));
+    shape(c, SHAPES[r.i], x, y, 18, COLORS[r.i], "#ffffff");
+  }
+
+  function draw() {
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const bg = c.createLinearGradient(0, 0, 0, H); bg.addColorStop(0, "#0f1640"); bg.addColorStop(1, "#1c1250");
+    c.fillStyle = bg; c.fillRect(0, 0, W, H);
+    for (const s of sky) { const x = ((s.x - t * s.v * 40) % W + W) % W; dot(c, x, s.y, s.r, `rgba(255,255,255,${0.35 + 0.35 * Math.sin(t * 2 + s.x)})`); }
+    // HUD: lives, multiplier, score.
+    rr(c, 16, 16, 328, 40, 20); c.fillStyle = "rgba(255,255,255,0.1)"; c.fill();
+    for (let i = 0; i < 3; i++) shape(c, "heart", 38 + i * 26, 36, 10, i < lives ? "#ff4d6d" : "rgba(255,255,255,0.15)");
+    c.fillStyle = "#fff4d6"; c.font = "700 18px Fredoka, sans-serif";
+    c.textAlign = "center"; c.fillText(`×${mult()}`, 190, 42);
+    c.textAlign = "right"; c.fillText(score, 328, 42);
+    // The order card.
+    rr(c, 16, 68, 328, 132, 24); c.fillStyle = "rgba(255,255,255,0.1)"; c.fill();
+    c.textAlign = "center";
+    if (over) {
+      c.fillStyle = "#fff4d6"; c.font = "700 30px Fredoka, sans-serif"; c.fillText("Out of lives!", 180, 126);
+      c.font = "600 16px Fredoka, sans-serif"; c.fillStyle = "#b9c2e8"; c.fillText(`${done} orders done · tap to play again`, 180, 160);
+    } else if (!started) {
+      c.fillStyle = "#fff4d6"; c.font = "700 30px Fredoka, sans-serif"; c.fillText("Tap to start", 180, 126);
+      c.font = "600 16px Fredoka, sans-serif"; c.fillStyle = "#b9c2e8"; c.fillText("read the order, press at the right moment", 180, 160);
+    } else if (cmd) {
+      if (cmd.says) { c.font = "600 15px Fredoka, sans-serif"; c.fillStyle = "#7dffb0"; c.fillText("Crackit says:", 180, 92); }
+      c.font = "700 36px Fredoka, sans-serif"; c.fillStyle = cmd.top === "HOLD" ? "#7cc8ff" : "#ffd23f"; c.fillText(cmd.top, 180, 130);
+      c.font = "600 19px Fredoka, sans-serif"; c.fillStyle = "#fff4d6";
+      if (cmd.who !== undefined) {
+        const text = `${NAMES[cmd.who]} ${cmd.line}`;
+        const width = c.measureText(text).width;
+        shape(c, SHAPES[cmd.who], 180 - width / 2 - 16, 162, 11, COLORS[cmd.who], "#ffffff");
+        c.fillText(text, 180 + 6, 168);
+      } else {
+        c.fillText(cmd.kind === "every" ? `${cmd.line}  (${cmd.presses}/${cmd.need})` : cmd.line, 180, 168);
+      }
+      rr(c, 40, 182, 280, 6, 3); c.fillStyle = "rgba(255,255,255,0.15)"; c.fill();
+      rr(c, 40, 182, 280 * Math.max(0, 1 - (t - cmd.start) / cmd.window), 6, 3); c.fillStyle = "#b9c2e8"; c.fill();
+    } else {
+      c.font = "600 18px Fredoka, sans-serif"; c.fillStyle = "#b9c2e8"; c.fillText("Get ready...", 180, 140);
+    }
+    for (let i = 0; i < COUNT; i++) if (i % 2 === 0) { c.fillStyle = "rgba(255,255,255,0.04)"; c.fillRect(0, LANE_TOP + i * LANE_H, W, LANE_H); }
+    for (const r of racers) drawComet(r, screenX(r.p), laneY(r.i));
+    // Feedback over the race.
+    if (feedback) {
+      c.globalAlpha = Math.min(1, feedback.life * 2);
+      c.font = "700 24px Fredoka, sans-serif"; c.fillStyle = feedback.ok ? "#3fd17f" : "#ff6b6b"; c.textAlign = "center";
+      c.fillText(feedback.text, 180, 476);
+      c.globalAlpha = 1;
+    }
+    // The big button: a glossy round pad that sinks while held.
+    const sink = down ? 6 : 0;
+    dot(c, BUTTON.x, BUTTON.y + 8, BUTTON.r, "#8a5200");
+    const face = c.createRadialGradient(BUTTON.x - 18, BUTTON.y - 22 + sink, 6, BUTTON.x, BUTTON.y + sink, BUTTON.r);
+    face.addColorStop(0, "#ffe08a"); face.addColorStop(0.6, "#ffb000"); face.addColorStop(1, "#d98200");
+    dot(c, BUTTON.x, BUTTON.y + sink, BUTTON.r, face);
+    c.fillStyle = "#5a3500"; c.font = "700 22px Fredoka, sans-serif"; c.textAlign = "center"; c.fillText(cmd && cmd.top === "HOLD" ? "HOLD" : "PRESS", BUTTON.x, BUTTON.y + 8 + sink);
+  }
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000); last = now; t += dt;
+    step(dt); draw(); requestAnimationFrame(frame);
+  }
+  reset();
+  requestAnimationFrame(frame);
+  document.getElementById("basic").onclick = () => { tricks = false; document.getElementById("basic").classList.add("on"); document.getElementById("tricks").classList.remove("on"); reset(); };
+  document.getElementById("tricks").onclick = () => { tricks = true; document.getElementById("tricks").classList.add("on"); document.getElementById("basic").classList.remove("on"); reset(); };
+})();
+</script>
+</body>
+</html>
