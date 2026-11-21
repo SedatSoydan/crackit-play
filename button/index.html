@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="robots" content="noindex, nofollow">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Button Bot draft 4</title>
+<title>Button Bot draft 5</title>
 <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
   :root { --bg: #0e1024; --text: #f4f1ec; --muted: #9ba3be; }
@@ -24,9 +24,10 @@
 <body>
 <main>
   <div class="intro">
-    <h1>Button Bot · taslak 4</h1>
+    <h1>Button Bot · taslak 5</h1>
     <ul>
       <li>İki tuş: <b>KIRMIZI</b> ve <b>MAVİ</b>. Klavyede sol tuş <b>A</b> ya da ←, sağ tuş <b>D</b> ya da →. Telefonda iki tuşa aynı anda basılabilir.</li>
+      <li><b>TAP</b> = kısa dokun, <b>HOLD</b> = basılı tut (tuşun etrafındaki halka dolunca basılı tutma sayılır). Kart hangisini diyorsa o; yanlış türde basmak da hatadır.</li>
       <li>Her tur süre bitene kadar sürer; doğru yaptın mı söylenmez. Görevi bitirdikten sonra bir daha basarsan o da yanlış sayılır.</li>
       <li><b>Tek yanlışta oyun biter</b> ve nedeni yazılır. Tur 1–5 temel, 6–15 tuzaklar, 16 ve sonrası hafıza, tuş değişimi, bas-tut-dokun, son saniye, ⭐ kuralı.</li>
     </ul>
@@ -62,51 +63,58 @@
   const fail = (why) => "FAIL:" + why;
 
   // --- Rules ----------------------------------------------------------------------------------
-  // A rule makes an instance from the round context. Handlers return "PASS", "CONTINUE", or
-  // "FAIL:<reason>": onPress(key, s), onRelease(key, s), onTick(s), onTimeout(s). A PASS only
-  // marks the task done: the round still runs to the end of its time, the player is not
-  // told, and any press after that is a mistake.
-  const pressColor = (c, extra) => Object.assign({
-    onPress: (k) => (k === c ? "PASS" : fail(`Pressed ${N(k)} instead of ${N(c)}`)),
-    onTimeout: () => fail(`Time ran out: it was ${N(c)}`),
+  // Every press is measured: let go within HOLD seconds and it is a TAP; keep it down for
+  // HOLD seconds and it is a HOLD. Rules get the measured press: onPress(key, s, kind).
+  // A card says TAP or HOLD (inst.wants); the wrong kind is a mistake. Handlers return
+  // "PASS", "CONTINUE", or "FAIL:<reason>". A PASS only marks the task done: the round still
+  // runs to the end of its time, the player is not told, and any press after that is a mistake.
+  const HOLD = 0.6;
+  const verb = (kind) => (kind === "hold" ? "Hold" : "Tap");
+  const mode = (ctx) => (ctx.round >= 3 && rand() < 0.4 ? "hold" : "tap");
+  const pressColor = (c, kind, extra) => Object.assign({
+    wants: kind,
+    onPress: (k) => (k === c ? "PASS" : fail(`${verb(kind) === "Hold" ? "Held" : "Tapped"} ${N(k)} instead of ${N(c)}`)),
+    onTimeout: () => fail(`Time ran out: ${verb(kind).toLowerCase()} ${N(c)}`),
   }, extra);
   const exactly = (c, n) => ({
+    wants: "tap",
     onPress: (k, s) => {
-      if (k !== c) return fail(`Pressed ${N(k)} instead of ${N(c)}`);
-      if (s.count[c] > n) return fail(`Too many: ${s.count[c]} presses, wanted ${n}`);
+      if (k !== c) return fail(`Tapped ${N(k)} instead of ${N(c)}`);
+      if (s.count[c] > n) return fail(`Too many: ${s.count[c]} taps, wanted ${n}`);
       return "CONTINUE";
     },
-    onTimeout: (s) => (s.count[c] === n ? "PASS" : fail(`Only ${s.count[c]} of ${n} presses`)),
+    onTimeout: (s) => (s.count[c] === n ? "PASS" : fail(`Only ${s.count[c]} of ${n} taps`)),
   });
   const RULES = [
-    { id: "press", tier: 1, make: () => { const c = pick(KEYS); return pressColor(c, { lines: [[T("Press "), C(c)]] }); } },
+    { id: "press", tier: 1, make: (ctx) => { const c = pick(KEYS), kind = mode(ctx); return pressColor(c, kind, { lines: [[T(verb(kind) + " "), C(c)]] }); } },
     { id: "nothing", tier: 1, make: () => ({
       lines: pick([[[T("Do NOT press")], [T("anything")]], [[T("Hands off!")]], [[T("Don't touch")], [T("the buttons")]]]),
-      time: -1, onPress: () => fail("You pressed a button"), onTimeout: () => "PASS" }) },
-    { id: "both", tier: 1, make: () => ({
-      lines: [[T("Press BOTH")], [T("buttons together")]],
-      onPress: (k, s) => (s.down[other(k)] || s.elapsed - s.lastPress[other(k)] < 0.15 ? "PASS" : "CONTINUE"),
-      onTick: (s) => { for (const k of KEYS) if (s.count[k] && !s.count[other(k)] && !s.down[k] && s.elapsed - s.lastPress[k] > 0.15) return fail(`Only ${N(k)} was pressed`); return "CONTINUE"; },
-      onTimeout: () => fail("Time ran out: press both together") }) },
-    { id: "exact", tier: 1, make: () => { const c = pick(KEYS), n = between(2, 4); return Object.assign(exactly(c, n), { lines: [[T("Press "), C(c)], [T(`exactly ${n} times`)]], time: 0.5 }); } },
-    { id: "position", tier: 1, make: (ctx) => { const i = between(0, 1), word = ["LEFT", "RIGHT"][i], c = ctx.slots[i]; return { lines: [[T("Press the")], [T(`${word} button`)]],
-      onPress: (k) => (k === c ? "PASS" : fail(`That was the ${i ? "LEFT" : "RIGHT"} button`)), onTimeout: () => fail(`Time ran out: it was the ${word} button`) }; } },
+      none: true, time: -1, onPress: () => fail("You pressed a button"), onTimeout: () => "PASS" }) },
+    { id: "both", tier: 1, make: (ctx) => { const kind = mode(ctx); return {
+      lines: [[T(`${verb(kind)} BOTH`)], [T("buttons together")]], wants: kind,
+      onPress: (k, s) => (s.count[other(k)] ? (Math.abs(s.downAt.R - s.downAt.B) < 0.25 ? "PASS" : fail("The buttons were not together")) : "CONTINUE"),
+      onTick: (s) => { for (const k of KEYS) if (s.raw[k] && !s.raw[other(k)] && s.elapsed - s.downAt[k] > 0.25) return fail(`Only ${N(k)} was pressed`); return "CONTINUE"; },
+      onTimeout: () => fail(`Time ran out: ${verb(kind).toLowerCase()} both`) }; } },
+    { id: "exact", tier: 1, make: () => { const c = pick(KEYS), n = between(2, 4); return Object.assign(exactly(c, n), { lines: [[T("Tap "), C(c)], [T(`exactly ${n} times`)]], time: 0.5 }); } },
+    { id: "position", tier: 1, make: (ctx) => { const i = between(0, 1), word = ["LEFT", "RIGHT"][i], c = ctx.slots[i], kind = mode(ctx); return { lines: [[T(`${verb(kind)} the`)], [T(`${word} button`)]], wants: kind,
+      onPress: (k) => (k === c ? "PASS" : fail(`That was the ${i ? "LEFT" : "RIGHT"} button`)), onTimeout: () => fail(`Time ran out: ${verb(kind).toLowerCase()} the ${word} button`) }; } },
 
-    { id: "stroopText", tier: 2, make: () => { const c = pick(KEYS); return pressColor(c, { lines: [[INK("Press ", other(c)), INK(N(c), other(c))]], small: "do what it SAYS" }); } },
-    { id: "stroopColor", tier: 2, make: () => { const w = pick(KEYS), ink = other(w); return pressColor(ink, { lines: [[T("Press the COLOUR")], [T("of this word:")]], inkWord: [N(w), ink] }); } },
+    { id: "stroopText", tier: 2, make: (ctx) => { const c = pick(KEYS), kind = mode(ctx); return pressColor(c, kind, { lines: [[INK(verb(kind) + " ", other(c)), INK(N(c), other(c))]], small: "do what it SAYS" }); } },
+    { id: "stroopColor", tier: 2, make: (ctx) => { const w = pick(KEYS), ink = other(w), kind = mode(ctx); return pressColor(ink, kind, { lines: [[T(`${verb(kind)} the COLOUR`)], [T("of this word:")]], inkWord: [N(w), ink] }); } },
     { id: "sequence", tier: 2, make: () => { const n = between(2, 3), seq = [pick(KEYS)]; while (seq.length < n) seq.push(rand() < 0.75 ? other(seq[seq.length - 1]) : seq[seq.length - 1]);
       const line = []; seq.forEach((k, i) => { if (i) line.push(T(", ")); line.push(C(k)); });
-      return { lines: n === 2 ? [[T("Press "), C(seq[0]), T(",")], [T("then "), C(seq[1])]] : [[T("In this order:")], line], time: 0.6,
+      return { lines: n === 2 ? [[T("Tap "), C(seq[0]), T(",")], [T("then "), C(seq[1])]] : [[T("Tap in this order:")], line], wants: "tap", time: 0.6,
         onPress: (k, s) => { const i = s.seq.length - 1; if (seq[i] !== k) return fail(`Wrong order: ${N(k)} came ${["first", "second", "third"][i]}`); return s.seq.length === seq.length ? "PASS" : "CONTINUE"; },
         onTimeout: () => fail("The order was not finished") }; } },
-    { id: "alternate", tier: 2, make: () => ({ lines: [[T("Alternate the")], [T("buttons 4 times")]], small: "start with either", time: 0.6,
+    { id: "alternate", tier: 2, make: () => ({ lines: [[T("Tap the buttons")], [T("in turn, 4 times")]], small: "start with either", wants: "tap", time: 0.6,
       onPress: (k, s) => { const q = s.seq; if (q.length >= 2 && q[q.length - 1] === q[q.length - 2]) return fail(`${N(k)} twice in a row`); return q.length === 4 ? "PASS" : "CONTINUE"; },
-      onTimeout: (s) => fail(`Only ${s.seq.length} of 4 presses`) }) },
-    { id: "hold", tier: 2, make: () => { const c = pick(KEYS), dur = 1.5; return { lines: [[T("Hold "), C(c)], [T("for 1.5 seconds")]], hold: [c, dur], time: 0.4,
-      onPress: (k) => (k === c ? "CONTINUE" : fail(`Pressed ${N(k)}`)),
-      onRelease: (k, s) => (k === c && s.elapsed - s.downAt[c] < dur ? fail("Let go too early") : "CONTINUE"),
-      onTick: (s) => (s.down[c] && s.elapsed - s.downAt[c] >= dur ? "PASS" : "CONTINUE"),
-      onTimeout: () => fail("Not held long enough") }; } },
+      onTimeout: (s) => fail(`Only ${s.seq.length} of 4 taps`) }) },
+    { id: "holdThenTap", tier: 2, make: () => { const a = pick(KEYS), b = pick(KEYS), first = rand() < 0.5 ? "hold" : "tap", second = first === "hold" ? "tap" : "hold";
+      return { lines: [[T(verb(first) + " "), C(a), T(",")], [T(`then ${verb(second).toLowerCase()} `), C(b)]], wants: "any", time: 1,
+        onPress: (k, s, kind) => { const i = s.seq.length - 1, want = i === 0 ? [a, first] : [b, second];
+          if (k !== want[0]) return fail(`${N(k)} came ${i ? "second" : "first"}`); if (kind !== want[1]) return fail(`${kind === "hold" ? "Held" : "Tapped"} ${N(k)}: it said ${want[1].toUpperCase()}`);
+          return i === 1 ? "PASS" : "CONTINUE"; },
+        onTimeout: () => fail("Not finished") }; } },
     { id: "count", tier: 2, make: () => {
       const kinds = ["circle", "square", "triangle"], tones = ["Y", "G", "R", "B"];
       const target = [pick(kinds), pick(tones)], n = between(1, 3), shapes = [];
@@ -115,24 +123,25 @@
       while (shapes.length < size) { const s = [pick(kinds), pick(tones)]; if (s[0] !== target[0] || s[1] !== target[1]) shapes.push(s); }
       for (let i = shapes.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [shapes[i], shapes[j]] = [shapes[j], shapes[i]]; }
       const c = pick(KEYS);
-      return Object.assign(exactly(c, n), { lines: [[T("Press "), C(c), T(" once for")], [T("every "), [`${N(target[1])} ${target[0].toUpperCase()}`, target[1]]]], shapes, time: 1.2 }); } },
-    { id: "math", tier: 2, make: () => { const a = between(2, 9), b = between(2, 9), right = rand() < 0.5, shown = right ? a + b : a + b + pick([-2, -1, 1, 2]); const yes = pick(KEYS), no = other(yes), c = right ? yes : no;
-      return pressColor(c, { lines: [[T("Press "), C(yes), T(" if")], [T(`${a} + ${b} = ${shown}`)], [T("else "), C(no)]], time: 0.8 }); } },
-    { id: "doubleNot", tier: 2, make: () => { const c = pick(KEYS); return pressColor(c, { lines: [[T("Don't NOT")], [T("press "), C(c)]] }); } },
-    { id: "corners", tier: 2, make: () => { const c = pick(KEYS), n = between(3, 6); return Object.assign(exactly(c, n), { lines: [[T("Press "), C(c), T(" once")], [T("per corner")]], polygon: n, time: 1 }); } },
+      return Object.assign(exactly(c, n), { lines: [[T("Tap "), C(c), T(" once for")], [T("every "), [`${N(target[1])} ${target[0].toUpperCase()}`, target[1]]]], shapes, time: 1.2 }); } },
+    { id: "math", tier: 2, make: (ctx) => { const a = between(2, 9), b = between(2, 9), right = rand() < 0.5, shown = right ? a + b : a + b + pick([-2, -1, 1, 2]); const yes = pick(KEYS), no = other(yes), c = right ? yes : no, kind = mode(ctx);
+      return pressColor(c, kind, { lines: [[T(`${verb(kind)} `), C(yes), T(" if")], [T(`${a} + ${b} = ${shown}`)], [T("else "), C(no)]], time: 0.8 }); } },
+    { id: "doubleNot", tier: 2, make: (ctx) => { const c = pick(KEYS), kind = mode(ctx); return pressColor(c, kind, { lines: [[T("Don't NOT")], [T(`${verb(kind).toLowerCase()} `), C(c)]] }); } },
+    { id: "corners", tier: 2, make: () => { const c = pick(KEYS), n = between(3, 6); return Object.assign(exactly(c, n), { lines: [[T("Tap "), C(c), T(" once")], [T("per corner")]], polygon: n, time: 1 }); } },
 
-    { id: "same", tier: 3, ok: (ctx) => ctx.last && ctx.last.single, make: (ctx) => { const c = ctx.last.single; return pressColor(c, { lines: [[T("Press the SAME")], [T("button as last round")]] }); } },
-    { id: "opposite", tier: 3, ok: (ctx) => ctx.last && ctx.last.single, make: (ctx) => { const c = other(ctx.last.single); return pressColor(c, { lines: [[T("Press the OTHER")], [T("button from last round")]] }); } },
+    { id: "same", tier: 3, ok: (ctx) => ctx.last && ctx.last.single, make: (ctx) => { const c = ctx.last.single, kind = mode(ctx); return pressColor(c, kind, { lines: [[T(`${verb(kind)} the SAME`)], [T("button as last round")]] }); } },
+    { id: "opposite", tier: 3, ok: (ctx) => ctx.last && ctx.last.single, make: (ctx) => { const c = other(ctx.last.single), kind = mode(ctx); return pressColor(c, kind, { lines: [[T(`${verb(kind)} the OTHER`)], [T("button from last round")]] }); } },
     { id: "swap", tier: 3, make: (ctx) => { swapSlots(); ctx.slots = game.slots; if (rand() < 0.5) { const inst = RULES.find((r) => r.id === "position").make(ctx); inst.small = "the buttons swapped!"; inst.time = 0.8; return inst; }
-      const c = pick(KEYS); return pressColor(c, { lines: [[T("Press "), C(c)]], small: "the buttons swapped!", time: 0.8 }); } },
-    { id: "holdTap", tier: 3, make: () => { const c = pick(KEYS), o = other(c); return { lines: [[T("Hold "), C(c), T(" and")], [T("tap "), C(o), T(" twice")]], time: 1.2,
-      onPress: (k, s) => { if (k === c) return "CONTINUE"; if (!s.down[c]) return fail(`Tapped ${N(o)} without holding ${N(c)}`); return s.count[o] >= 2 ? "PASS" : "CONTINUE"; },
+      const c = pick(KEYS), kind = mode(ctx); return pressColor(c, kind, { lines: [[T(verb(kind) + " "), C(c)]], small: "the buttons swapped!", time: 0.8 }); } },
+    { id: "holdTap", tier: 3, make: () => { const c = pick(KEYS), o = other(c); return { lines: [[T("Hold "), C(c), T(" and")], [T("tap "), C(o), T(" twice")]], wants: "any", time: 1.2,
+      onPress: (k, s, kind) => { if (k === c) return kind !== "hold" ? fail(`Tapped ${N(c)}: it said HOLD`) : s.count[o] >= 2 ? "PASS" : "CONTINUE";
+        if (kind === "hold") return fail(`Held ${N(o)}: it said TAP`); if (!s.raw[c]) return fail(`Tapped ${N(o)} without holding ${N(c)}`); return s.count[o] >= 2 && s.count[c] > 0 ? "PASS" : "CONTINUE"; },
       onRelease: (k, s) => (k === c && s.count[o] < 2 ? fail(`Let go of ${N(c)} too early`) : "CONTINUE"),
       onTimeout: () => fail("Time ran out") }; } },
-    { id: "lastSecond", tier: 3, make: () => { const c = pick(KEYS); return { lines: [[T("Press "), C(c), T(" only in")], [T("the last second")]], small: "wait for the red zone", zone: 1, time: 0.6,
-      onPress: (k, s) => { if (s.left > 1.0) return fail(`Too early: ${s.left.toFixed(1)} s were left`); return k === c ? "PASS" : fail(`Pressed ${N(k)} instead of ${N(c)}`); },
+    { id: "lastSecond", tier: 3, make: () => { const c = pick(KEYS); return { lines: [[T("Tap "), C(c), T(" only in")], [T("the last second")]], small: "wait for the red zone", zone: 1, wants: "tap", time: 0.6,
+      onPress: (k, s) => { const left = s.total - s.downAt[k]; if (left > 1.0) return fail(`Too early: ${left.toFixed(1)} s were left`); return k === c ? "PASS" : fail(`Tapped ${N(k)} instead of ${N(c)}`); },
       onTimeout: () => fail("Too late") }; } },
-    { id: "starRule", tier: 3, ok: (ctx) => !ctx.rule, make: () => { const c = pick(KEYS); game.rule = c; return { lines: [[T("From now on:")], [T("⭐ means press "), C(c)]], small: "remember it! press nothing now", time: 0.4, onPress: () => fail("Nothing to press yet"), onTimeout: () => "PASS" }; } },
+    { id: "starRule", tier: 3, ok: (ctx) => !ctx.rule, make: () => { const c = pick(KEYS); game.rule = c; return { lines: [[T("From now on:")], [T("⭐ means tap "), C(c)]], small: "remember it! press nothing now", none: true, time: 0.4, onPress: () => fail("Nothing to press yet"), onTimeout: () => "PASS" }; } },
   ];
 
   // --- Game state ------------------------------------------------------------------------------
@@ -147,7 +156,7 @@
     rand = mulberry(Math.floor(Math.random() * 1e9));
     game = { phase: "menu", round: (startRound || 1) - 1, score: 0, slots: KEYS.slice(), slotX: { R: SLOT_X[0], B: SLOT_X[1] },
       last: null, lastId: null, rule: null, inst: null, s: null, why: "", mood: "wait", shake: 0, flash: 0, parts: [], ripples: [], pulse: 0, enter: 1,
-      pressed: game ? game.pressed : { R: false, B: false }, look: 0, beat: 0, overWait: 0, record: false };
+      pressed: game ? game.pressed : { R: false, B: false }, pressT: { R: 0, B: 0 }, look: 0, beat: 0, overWait: 0, record: false };
   }
   function start() { game.phase = "play"; nextRound(); }
   function swapSlots() { game.slots = game.slots.slice().reverse(); }
@@ -167,12 +176,12 @@
     // A standing rule: a star on a card overrides what the card says.
     if (game.rule && rule.id !== "starRule" && rand() < 0.22) {
       const k = game.rule;
-      Object.assign(inst, { star: true, onPress: (key) => (key === k ? "PASS" : fail(`⭐ means ${N(k)}`)), onRelease: null, onTick: null, onTimeout: () => fail(`⭐ means press ${N(k)}`), zone: 0, hold: null });
+      Object.assign(inst, { star: true, none: false, wants: "tap", onPress: (key) => (key === k ? "PASS" : fail(`⭐ means ${N(k)}`)), onRelease: null, onTick: null, onTimeout: () => fail(`⭐ means tap ${N(k)}`), zone: 0 });
     }
     inst.total = Math.max(3, baseTime(game.round) + (inst.time || 0));
     game.inst = inst;
     game.lastId = rule.id;
-    game.s = { down: { R: false, B: false }, count: { R: 0, B: 0 }, seq: [], downAt: { R: 0, B: 0 }, lastPress: { R: -9, B: -9 }, elapsed: 0, left: inst.total, done: false };
+    game.s = { raw: { R: false, B: false }, pending: { R: false, B: false }, count: { R: 0, B: 0 }, seq: [], kinds: [], downAt: { R: 0, B: 0 }, elapsed: 0, left: inst.total, total: inst.total, done: false };
     game.phase = "play"; game.mood = "wait"; game.enter = 0;
   }
 
@@ -181,6 +190,16 @@
     if (!result || result === "CONTINUE" || game.phase !== "play") return;
     if (result === "PASS") { game.s.done = true; return; }
     gameOver(result.slice(5));
+  }
+  // A measured press reaches the rule: first the TAP/HOLD check, then the rule itself.
+  function measured(key, kind) {
+    const s = game.s, inst = game.inst;
+    s.pending[key] = false;
+    s.count[key]++; s.seq.push(key); s.kinds.push(kind);
+    if (s.done) { gameOver(`${kind === "hold" ? "Held" : "Tapped"} ${N(key)} after the task was done`); return; }
+    if (inst.wants === "tap" && kind === "hold") { gameOver(`Held ${N(key)}: the card said TAP`); return; }
+    if (inst.wants === "hold" && kind === "tap") { gameOver(`Tapped ${N(key)}: the card said HOLD`); return; }
+    resolve(inst.onPress(key, s, kind));
   }
   function roundPassed() {
     const s = game.s, distinct = [...new Set(s.seq)];
@@ -199,7 +218,7 @@
   // --- Input -------------------------------------------------------------------------------------
   function press(key) {
     if (game.pressed[key]) return;
-    game.pressed[key] = true;
+    game.pressed[key] = true; game.pressT[key] = 0;
     const x = game.slotX[key];
     game.ripples.push({ x, y: BTN_Y, life: 1, key });
     game.look = x < 180 ? -1 : 1;
@@ -208,16 +227,19 @@
     if (game.phase === "over") { if (game.overWait <= 0) { newGame(1); start(); } return; }
     if (game.phase !== "play") return;
     const s = game.s;
-    s.down[key] = true; s.count[key]++; s.seq.push(key); s.downAt[key] = s.elapsed; s.lastPress[key] = s.elapsed;
+    s.raw[key] = true; s.pending[key] = true; s.downAt[key] = s.elapsed;
+    // A press on a "press nothing" card, or after the task is done, is wrong at once.
+    if (game.inst.none) { gameOver(game.inst.id === "starRule" ? "Nothing to press yet" : "You pressed a button"); return; }
     if (s.done) { gameOver(`Pressed ${N(key)} after the task was done`); return; }
-    resolve(game.inst.onPress ? game.inst.onPress(key, s) : "CONTINUE");
   }
   function release(key) {
     if (!game.pressed[key]) return;
     game.pressed[key] = false;
-    if (game.phase !== "play" || !game.s.down[key]) return;
-    game.s.down[key] = false;
-    if (!game.s.done && game.inst.onRelease) resolve(game.inst.onRelease(key, game.s));
+    if (game.phase !== "play" || !game.s.raw[key]) return;
+    const s = game.s;
+    s.raw[key] = false;
+    if (s.pending[key]) measured(key, "tap");
+    if (game.phase === "play" && !s.done && game.inst.onRelease) resolve(game.inst.onRelease(key, s));
   }
   function keyAt(x, y) { for (let i = 0; i < 2; i++) if (Math.hypot(x - SLOT_X[i], y - BTN_Y) < BTN_R + 14) return game.slots[i]; return null; }
   const pointers = {};
@@ -245,6 +267,7 @@
   // --- Update -------------------------------------------------------------------------------------
   function step(dt) {
     for (let i = 0; i < 2; i++) { const k = game.slots[i]; game.slotX[k] += (SLOT_X[i] - game.slotX[k]) * Math.min(1, dt * 9); }
+    for (const k of KEYS) if (game.pressed[k]) game.pressT[k] += dt;
     game.shake = Math.max(0, game.shake - dt * 2.5); game.flash = Math.max(0, game.flash - dt * 2); game.pulse = Math.max(0, game.pulse - dt * 1.2);
     game.enter = Math.min(1, game.enter + dt / 0.3);
     game.look *= Math.pow(0.1, dt);
@@ -258,8 +281,13 @@
       s.elapsed += dt; s.left -= dt;
       if (Math.ceil(before) !== Math.ceil(s.left) && s.left > 0 && s.left < 3) sound("tick");
       if (s.left < 1.2) { game.beat -= dt; if (game.beat <= 0) { sound("beat"); game.beat = 0.45; } }
-      if (!s.done && inst.onTick) resolve(inst.onTick(s));
+      // A press kept down for HOLD seconds becomes a HOLD.
+      for (const k of KEYS) if (game.phase === "play" && s.pending[k] && s.elapsed - s.downAt[k] >= HOLD) { sound("hold"); measured(k, "hold"); }
+      if (game.phase === "play" && !s.done && inst.onTick) resolve(inst.onTick(s));
       if (game.phase === "play" && s.left <= 0) {
+        // A press still down when the time runs out counts as a tap.
+        for (const k of KEYS) if (game.phase === "play" && s.pending[k]) measured(k, "tap");
+        if (game.phase !== "play") return;
         if (s.done) roundPassed();
         else { const r = inst.onTimeout(s); if (r === "PASS") roundPassed(); else resolve(r); }
       }
@@ -281,6 +309,7 @@
     switch (kind) {
       case "pressR": tone(330, 0.08, "square", 0.08, 220); break;
       case "pressB": tone(494, 0.08, "square", 0.08, 330); break;
+      case "hold": tone(520, 0.16, "sine", 0.12, 880); break;
       case "tick": tone(1200, 0.04, "sine", 0.06); break;
       case "beat": tone(70, 0.12, "sine", 0.35, 50); tone(70, 0.1, "sine", 0.25, 50, 0.14); break;
       case "next": tone(660, 0.1, "triangle", 0.1); break;
@@ -378,7 +407,7 @@
   }
   function drawPrompt(inst, x, y, w, h) {
     const lines = inst.lines, size = lines.length > 2 ? 28 : 32;
-    let top = y + (inst.shapes || inst.polygon || inst.inkWord || inst.hold ? 70 : lines.length > 2 ? 108 : 128);
+    let top = y + (inst.shapes || inst.polygon || inst.inkWord ? 70 : lines.length > 2 ? 108 : 128);
     c.textBaseline = "alphabetic"; c.textAlign = "left";
     for (const line of lines) {
       c.font = `700 ${size}px Fredoka, sans-serif`;
@@ -396,7 +425,6 @@
     if (inst.shapes) { const n = inst.shapes.length, gap = Math.min(42, (w - 50) / n); inst.shapes.forEach(([k, tone], i) => shape(k, 180 - (n - 1) * gap / 2 + i * gap, midY - 6 + (i % 2) * 14 + Math.sin(t * 2 + i) * 2, 15, COLORS[tone].face)); }
     if (inst.polygon) { c.save(); c.translate(180, midY); c.rotate(Math.sin(t * 0.8) * 0.08); c.beginPath(); for (let i = 0; i < inst.polygon; i++) { const a = -Math.PI / 2 + i * TAU / inst.polygon + (inst.polygon === 4 ? Math.PI / 4 : 0); c.lineTo(Math.cos(a) * 46, Math.sin(a) * 46); } c.closePath(); c.fillStyle = lin(0, -46, 0, 46, [[0, "#ffffff"], [1, "#aeb8ff"]]); c.shadowColor = "#9db4ff"; c.shadowBlur = 20; c.fill(); c.shadowBlur = 0; c.restore(); }
     if (inst.inkWord) { const [word, ink] = inst.inkWord; c.font = "700 60px Fredoka, sans-serif"; c.textAlign = "center"; c.fillStyle = COLORS[ink].face; c.shadowColor = COLORS[ink].face; c.shadowBlur = 18; c.fillText(word, 180, midY + 22); c.shadowBlur = 0; }
-    if (inst.hold) { const [k, dur] = inst.hold, s = game.s, f = s.down[k] ? Math.min(1, (s.elapsed - s.downAt[k]) / dur) : 0; rr(60, midY - 12, 240, 26, 13); c.fillStyle = "rgba(255,255,255,0.1)"; c.fill(); if (f > 0) { rr(60, midY - 12, Math.max(26, 240 * f), 26, 13); c.fillStyle = COLORS[k].face; c.shadowColor = COLORS[k].face; c.shadowBlur = 14; c.fill(); c.shadowBlur = 0; } }
     if (inst.small) { c.font = "600 16px Fredoka, sans-serif"; c.textAlign = "center"; c.fillStyle = "#aab4ef"; c.fillText(inst.small, 180, y + h - 28); }
     if (inst.star) star(x + w - 36, y + 38 + Math.sin(t * 3) * 2, 22);
   }
@@ -419,6 +447,13 @@
       c.beginPath(); c.ellipse(x, top, BTN_R, 26, 0, 0, TAU); c.fillStyle = g; c.fill();
       c.beginPath(); c.ellipse(x - 16, top - 9, 20, 7, -0.25, 0, TAU); c.fillStyle = "rgba(255,255,255,0.5)"; c.fill();
       c.beginPath(); c.ellipse(x + 22, top + 8, 10, 4, -0.25, 0, TAU); c.fillStyle = "rgba(255,255,255,0.15)"; c.fill();
+      // While a button is down, a ring fills; full means the press counts as a HOLD.
+      if (down) {
+        const f = Math.min(1, game.pressT[key] / HOLD), full = f >= 1;
+        c.beginPath(); c.ellipse(x, top, BTN_R + 9, 33, 0, -Math.PI / 2, -Math.PI / 2 + TAU * f);
+        c.lineWidth = full ? 6 : 4; c.lineCap = "round"; c.strokeStyle = full ? "#ffd23f" : "rgba(255,255,255,0.85)"; c.shadowColor = full ? "#ffd23f" : "#ffffff"; c.shadowBlur = full ? 16 : 6; c.stroke(); c.shadowBlur = 0;
+        if (full) { c.font = "700 15px Fredoka, sans-serif"; c.textAlign = "center"; c.fillStyle = "#ffd23f"; c.fillText("HOLD", x, top - 40); }
+      }
       rr(x - 36, 600, 72, 20, 10); c.fillStyle = "rgba(0,0,0,0.3)"; c.fill();
       c.font = "700 14px Fredoka, sans-serif"; c.textAlign = "center"; c.fillStyle = col.text; c.fillText(col.name, x, 615);
     }
@@ -443,7 +478,7 @@
     if (game.shake > 0) c.translate((Math.random() - 0.5) * 16 * game.shake, (Math.random() - 0.5) * 12 * game.shake);
     drawBackground(); drawHud(); drawTimer(); drawBot(); drawCard(); drawButtons(); drawParticles();
     if (game.flash > 0) { c.fillStyle = `rgba(255,60,80,${game.flash * 0.3})`; c.fillRect(-20, -20, W + 40, H + 40); }
-    if (game.phase === "menu") panel("BUTTON BOT", "#ffffff", [["Do exactly what the robot says.", "600 18px Fredoka, sans-serif", "#cfd5ff"], ["Every round lasts to the end of the bar.", "600 18px Fredoka, sans-serif", "#cfd5ff"], ["One mistake ends the game.", "700 18px Fredoka, sans-serif", "#ff8a94"], [`Best: ${best}`, "700 20px Fredoka, sans-serif", "#ffd23f"]], "press a button to start");
+    if (game.phase === "menu") panel("BUTTON BOT", "#ffffff", [["Do what the robot says.", "600 18px Fredoka, sans-serif", "#cfd5ff"], ["TAP = quick press", "700 18px Fredoka, sans-serif", "#ffffff"], ["HOLD = keep it down", "700 18px Fredoka, sans-serif", "#ffffff"], ["One mistake ends the game.", "700 18px Fredoka, sans-serif", "#ff8a94"], [`Best: ${best}`, "700 20px Fredoka, sans-serif", "#ffd23f"]], "press a button to start");
     if (game.phase === "over") panel("Game over", "#ff6b7a", [[game.why, "600 18px Fredoka, sans-serif", "#ffe3e6"], [`${game.score}`, "700 52px Fredoka, sans-serif", "#ffffff"], [game.record ? "rounds · new best!" : `rounds · best ${best}`, "600 17px Fredoka, sans-serif", game.record ? "#ffd23f" : "#cfd5ff"]], game.overWait > 0 ? "" : "press a button to play again");
   }
   function frame(now) { const dt = Math.min(0.05, (now - last) / 1000); last = now; t += dt; step(dt); draw(); requestAnimationFrame(frame); }
