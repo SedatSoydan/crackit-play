@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex, nofollow">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Button Bot draft 1</title>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #14172b; --text: #f4f1ec; --muted: #9ba3be; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 900px; margin: 0 auto; padding: 20px 12px 40px; }
+  .intro { max-width: 580px; margin: 0 auto 16px; }
+  .intro h1 { margin: 0 0 6px; font-size: 22px; }
+  .intro li { color: var(--muted); margin: 0 0 4px; font-size: 15px; }
+  .intro ul { padding-left: 18px; margin: 6px 0 0; }
+  .phone { width: min(360px, 100%, calc((100vh - 40px) * 0.5625)); margin: 0 auto; border-radius: 30px; overflow: hidden; box-shadow: 0 0 0 8px #000; touch-action: none; user-select: none; -webkit-user-select: none; }
+  canvas { display: block; width: 100%; height: auto; }
+  .row { display: flex; gap: 10px; justify-content: center; margin-top: 14px; flex-wrap: wrap; align-items: center; }
+  button { font: 600 16px Fredoka, sans-serif; border: 0; border-radius: 14px; padding: 8px 16px; background: #2b3157; color: var(--text); cursor: pointer; }
+  .seed { color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="intro">
+    <h1>Button Bot · taslak 1</h1>
+    <ul>
+      <li>Robot her kartta tek bir talimat verir. Talimata göre <b>KIRMIZI, SARI, MAVİ</b> tuşlara bas (ya da basma!). Klavyede 1, 2, 3.</li>
+      <li>Doğru yapınca kart hemen biter; yanlış tuşa basınca da biter. “Hiçbir şeye basma” kartında süre bitince doğru sayılır.</li>
+      <li>Yeni türler kart kart açılır: yasaklar, sıralar, sayma, basılı tutma, hafıza, kalıcı kural (⭐), boya tuzağı, tuşların yer değiştirmesi. 3 can.</li>
+      <li>Her açılış farklı başlar. Aynı oyunu tekrar oynamak için alttaki tohum numarasını not et.</li>
+    </ul>
+  </div>
+  <div class="phone"><canvas id="board" width="360" height="640"></canvas></div>
+  <div class="row"><button id="restart">Yeni oyun</button><button id="jump">Kart 10'dan başla</button><span class="seed" id="seed"></span></div>
+</main>
+<script>
+(() => {
+  const W = 360, H = 640, TAU = Math.PI * 2;
+  const COLORS = {
+    R: { name: "RED", face: "#ef4444", low: "#b91c1c", edge: "#7f1d1d", text: "#ff5a5a" },
+    Y: { name: "YELLOW", face: "#facc15", low: "#ca8a04", edge: "#854d0e", text: "#ffd630" },
+    B: { name: "BLUE", face: "#3b82f6", low: "#1d4ed8", edge: "#1e3a8a", text: "#5b9bff" },
+  };
+  const KEYS = ["R", "Y", "B"];
+  const SLOT_X = [76, 180, 284], BTN_Y = 548, BTN_R = 44;
+  const WORDS = ["big red dog", "the sun is hot", "cats nap", "I like cake", "go to bed now", "one more", "fish swim fast", "a blue hat", "ducks say quack", "time to play"];
+  const SHAPES = [["triangle", 3], ["square", 4], ["pentagon", 5]];
+
+  // --- Seeded random --------------------------------------------------------------------
+  function mulberry(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  let rand = Math.random;
+  const pick = (a) => a[Math.floor(rand() * a.length)];
+  const between = (lo, hi) => lo + Math.floor(rand() * (hi - lo + 1));
+  const others = (c) => KEYS.filter((k) => k !== c);
+
+  // --- Card kinds ---------------------------------------------------------------------------
+  // A card: lines (arrays of [text, colour key or null]), an optional visual, the time, and
+  // the answer: {seq:[...]} exact presses, {any:[...]} one press of these, {none:true}, or
+  // {hold: key}. `want` is the short answer shown after a miss.
+  const C = (k) => [COLORS[k].name, k];
+  const T = (s) => [s, null];
+  const times = (n) => n === 1 ? "once" : n === 2 ? "twice" : `${n} times`;
+  const KINDS = {
+    simple: { from: 1, make: () => { const c = pick(KEYS); return { lines: [[T("Press "), C(c)]], time: 2.6, seq: [c], want: `${COLORS[c].name}` }; } },
+    times: { from: 2, make: () => { const c = pick(KEYS), n = between(2, 4); return { lines: [[T("Press "), C(c)], [T(times(n))]], time: 3.4, seq: Array(n).fill(c), want: `${COLORS[c].name} ×${n}` }; } },
+    not: { from: 3, make: () => { const c = pick(KEYS); return { lines: [[T("Press any button")], [T("but "), C(c)]], time: 2.8, any: others(c), want: `not ${COLORS[c].name}` }; } },
+    nothing: { from: 3, make: () => ({ lines: pick([[[T("Don't press")], [T("anything")]], [[T("Hands off!")]], [[T("Wait…")]]]), time: 2.4, none: true, want: "nothing" }) },
+    sequence: { from: 4, make: () => { const n = between(2, 3), s = []; while (s.length < n) { const c = pick(KEYS); if (c !== s[s.length - 1]) s.push(c); } const line = []; s.forEach((c, i) => { if (i) line.push(T(", ")); line.push(C(c)); }); return { lines: [line], small: "in this order", time: 3.6, seq: s, want: s.map((c) => COLORS[c].name).join(", ") }; } },
+    words: { from: 5, make: () => { const c = pick(KEYS), w = pick(WORDS), n = w.split(" ").length; return { lines: [[T("Press "), C(c), T(" once")], [T("per word:")]], quote: `“${w}”`, time: 5, seq: Array(n).fill(c), want: `${COLORS[c].name} ×${n}` }; } },
+    corners: { from: 5, make: () => { const c = pick(KEYS), [shape, n] = pick(SHAPES); return { lines: [[T("Press "), C(c), T(" once")], [T("per corner")]], shape: n, time: 4.4, seq: Array(n).fill(c), want: `${COLORS[c].name} ×${n} (${shape})` }; } },
+    hold: { from: 6, make: () => { const c = pick(KEYS); return { lines: [[T("Hold "), C(c)], [T("until the bar fills")]], time: 3.4, hold: c, holdFor: 1.3, want: `hold ${COLORS[c].name}` }; } },
+    position: { from: 7, make: () => { const i = between(0, 2), word = ["LEFT", "MIDDLE", "RIGHT"][i]; const c = state.slots[i]; return { lines: [[T("Press the")], [T(word), T(" button")]], time: 2.8, seq: [c], want: `the ${word.toLowerCase()} one (${COLORS[c].name})` }; } },
+    rememberColor: { from: 7, ok: () => !state.memColor, make: () => { const c = pick(KEYS); state.memColor = c; return { lines: [[T("Remember")], [T("this colour")]], blob: c, small: "don't press", time: 2.4, none: true, want: "nothing" }; } },
+    recallColor: { from: 8, ok: () => state.memColor && state.sinceMem >= 2, make: () => { const c = state.memColor; state.memColor = null; return { lines: [[T("Press the colour")], [T("you remembered")]], time: 3, seq: [c], want: COLORS[c].name }; } },
+    neither: { from: 8, make: () => { const c = pick(KEYS), [a, b] = others(c); return { lines: [[T("Not "), C(a), T(",")], [T("not "), C(b)]], time: 3, any: [c], want: COLORS[c].name }; } },
+    rememberNumber: { from: 9, ok: () => !state.memNumber, make: () => { const n = between(2, 4); state.memNumber = n; return { lines: [[T("Remember")], [T("this number")]], big: String(n), small: "don't press", time: 2.4, none: true, want: "nothing" }; } },
+    recallNumber: { from: 10, ok: () => state.memNumber && state.sinceNum >= 2, make: () => { const c = pick(KEYS), n = state.memNumber; state.memNumber = null; return { lines: [[T("Press "), C(c)], [T("your number of times")]], time: 4, seq: Array(n).fill(c), want: `${COLORS[c].name} ×${n}` }; } },
+    rule: { from: 10, ok: () => !state.rule, make: () => { const c = pick(KEYS); state.rule = c; return { lines: [[T("From now on:")], [T("⭐ = press "), C(c)]], small: "even if the card says else", time: 3.4, none: true, want: "nothing" }; } },
+    ink: { from: 11, make: () => { const word = pick(KEYS); const ink = pick(others(word)); const askInk = rand() < 0.5; const c = askInk ? ink : word; return { lines: [[T(askInk ? "Press the INK colour" : "Press the WORD")]], inkWord: [word, ink], time: 3, seq: [c], want: COLORS[c].name }; } },
+    swap: { from: 12, make: () => { swapSlots(); const inner = KINDS[pick(["simple", "position", "not"])].make(); inner.small = "the buttons moved!"; inner.time += 0.8; return inner; } },
+  };
+
+  function swapSlots() { const s = state.slots.slice(); do { for (let i = 2; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [s[i], s[j]] = [s[j], s[i]]; } } while (s.join() === state.slots.join()); state.slots = s; state.slotAnim = 0; }
+
+  function nextCard() {
+    state.card++;
+    state.sinceMem++; state.sinceNum++;
+    const n = state.card;
+    let names = Object.keys(KINDS).filter((k) => KINDS[k].from <= n && k !== state.lastKind && (!KINDS[k].ok || KINDS[k].ok()));
+    // A newly opened kind comes first, so every new rule gets shown.
+    const fresh = names.filter((k) => KINDS[k].from === n);
+    const kind = fresh.length ? fresh[0] : pick(names);
+    if (kind === "rememberColor") state.sinceMem = 0;
+    if (kind === "rememberNumber") state.sinceNum = 0;
+    state.lastKind = kind;
+    const card = KINDS[kind].make();
+    card.kind = kind;
+    // A standing rule: a star on a later card overrides it.
+    if (state.rule && kind !== "rule" && !card.none && rand() < 0.3) { card.star = true; card.seq = [state.rule]; card.any = null; card.hold = null; card.want = `⭐ → ${COLORS[state.rule].name}`; }
+    else if (state.rule && kind === "nothing" && rand() < 0.3) { card.star = true; card.none = false; card.seq = [state.rule]; card.want = `⭐ → ${COLORS[state.rule].name}`; }
+    card.time *= Math.max(0.6, 1 - (n - 1) * 0.015);
+    card.left = card.time; card.presses = []; card.held = 0;
+    state.cur = card;
+    state.phase = "card";
+  }
+
+  // --- State and flow -------------------------------------------------------------------------
+  let state, t = 0, last = performance.now();
+  function reset(startCard) {
+    const seed = Math.floor(Math.random() * 1e6);
+    rand = mulberry(seed);
+    document.getElementById("seed").textContent = `tohum ${seed}`;
+    state = { card: (startCard || 1) - 1, lives: 3, score: 0, streak: 0, slots: KEYS.slice(), slotAnim: 1, lastKind: null, memColor: null, memNumber: null, sinceMem: 9, sinceNum: 9, rule: null, cur: null, phase: "card", verdict: null, wait: 0, pressed: {}, mood: "wait" };
+    nextCard();
+  }
+  function finish(ok) {
+    const card = state.cur;
+    state.phase = "verdict"; state.verdict = ok; state.wait = ok ? 0.7 : 1.6; state.mood = ok ? "happy" : "sad";
+    if (ok) { state.streak++; state.score += 10 + 2 * Math.min(state.streak, 10); } else { state.streak = 0; state.lives--; }
+    if (card.kind === "swap" && !ok) state.wait += 0.3;
+  }
+  function press(key) {
+    if (state.phase === "over") { reset(1); return; }
+    if (state.phase !== "card") return;
+    const card = state.cur;
+    if (card.hold) { if (key !== card.hold) finish(false); return; }
+    if (card.none) { finish(false); return; }
+    if (card.any) { finish(card.any.includes(key)); return; }
+    card.presses.push(key);
+    const i = card.presses.length - 1;
+    if (card.seq[i] !== key) finish(false);
+    else if (card.presses.length === card.seq.length) finish(true);
+  }
+  function release(key) {
+    if (state.phase !== "card") return;
+    const card = state.cur;
+    if (card.hold === key && card.held > 0 && card.held < card.holdFor) finish(false);
+  }
+  function step(dt) {
+    state.slotAnim = Math.min(1, state.slotAnim + dt * 3);
+    if (state.phase === "card") {
+      const card = state.cur;
+      if (card.hold && state.pressed[card.hold]) { card.held += dt; if (card.held >= card.holdFor) { finish(true); return; } }
+      card.left -= dt;
+      if (card.left <= 0) finish(!!card.none);
+    } else if (state.phase === "verdict") {
+      state.wait -= dt;
+      if (state.wait <= 0) { state.mood = "wait"; if (state.lives <= 0) state.phase = "over"; else nextCard(); }
+    }
+  }
+
+  // --- Input ------------------------------------------------------------------------------------
+  const canvas = document.getElementById("board");
+  const c = canvas.getContext("2d");
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  const slotX = (i) => SLOT_X[i];
+  function keyAt(x, y) { for (let i = 0; i < 3; i++) if (Math.hypot(x - slotX(i), y - BTN_Y) < BTN_R + 8) return state.slots[i]; return null; }
+  const pointers = {};
+  canvas.addEventListener("pointerdown", (ev) => {
+    ev.preventDefault();
+    const r = canvas.getBoundingClientRect();
+    const x = (ev.clientX - r.left) * W / r.width, y = (ev.clientY - r.top) * H / r.height;
+    if (state.phase === "over") { reset(1); return; }
+    const key = keyAt(x, y); if (!key) return;
+    pointers[ev.pointerId] = key; state.pressed[key] = true; press(key);
+  });
+  const up = (ev) => { const key = pointers[ev.pointerId]; if (!key) return; delete pointers[ev.pointerId]; state.pressed[key] = false; release(key); };
+  canvas.addEventListener("pointerup", up); canvas.addEventListener("pointercancel", up); canvas.addEventListener("pointerleave", up);
+  const KEYMAP = { "1": 0, "2": 1, "3": 2 };
+  window.addEventListener("keydown", (ev) => { if (ev.repeat || !(ev.key in KEYMAP)) return; const key = state.slots[KEYMAP[ev.key]]; state.pressed[key] = true; press(key); });
+  window.addEventListener("keyup", (ev) => { if (!(ev.key in KEYMAP)) return; const key = state.slots[KEYMAP[ev.key]]; state.pressed[key] = false; release(key); });
+
+  // --- Drawing ----------------------------------------------------------------------------------
+  function dot(x, y, r, f) { c.beginPath(); c.arc(x, y, r, 0, TAU); c.fillStyle = f; c.fill(); }
+  function rr(x, y, w, h, r) { c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); }
+  function lin(x0, y0, x1, y1, st) { const g = c.createLinearGradient(x0, y0, x1, y1); st.forEach(([o, col]) => g.addColorStop(o, col)); return g; }
+  function rad(x, y, r0, r1, st) { const g = c.createRadialGradient(x, y, r0, x, y, r1); st.forEach(([o, col]) => g.addColorStop(o, col)); return g; }
+  function star(x, y, r, fill) { c.beginPath(); for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, d = i % 2 ? r * 0.45 : r; c.lineTo(x + Math.cos(a) * d, y + Math.sin(a) * d); } c.closePath(); c.fillStyle = fill; c.fill(); c.lineWidth = 2; c.strokeStyle = "#b45309"; c.stroke(); }
+  function heart(x, y, s, f) { c.beginPath(); for (let i = 0; i < 30; i++) { const k = i * TAU / 30; c.lineTo(x + 16 * Math.pow(Math.sin(k), 3) * s / 16, y - (13 * Math.cos(k) - 5 * Math.cos(2 * k) - 2 * Math.cos(3 * k) - Math.cos(4 * k)) * s / 16); } c.closePath(); c.fillStyle = f; c.fill(); }
+
+  function drawRoom() {
+    c.fillStyle = lin(0, 0, 0, H, [[0, "#2a2f5c"], [0.55, "#1b1f40"], [1, "#11132a"]]); c.fillRect(0, 0, W, H);
+    for (let i = 0; i < 26; i++) dot((i * 97) % W, (i * 53) % 220, 1 + (i % 3) * 0.5, `rgba(255,255,255,${0.15 + (i % 4) * 0.06})`);
+  }
+  function drawRobot() {
+    const x = 180, y = 92 + Math.sin(t * 2) * 2;
+    // Antenna with a blinking bulb.
+    c.strokeStyle = "#9aa3c7"; c.lineWidth = 4; c.beginPath(); c.moveTo(x, y - 52); c.lineTo(x, y - 74); c.stroke();
+    const blink = Math.sin(t * 4) > 0;
+    dot(x, y - 78, 8, state.mood === "sad" ? "#ef4444" : state.mood === "happy" ? "#4ade80" : blink ? "#facc15" : "#a16207");
+    // Ears.
+    for (const s of [-1, 1]) { rr(x + s * 82 - 9, y - 16, 18, 36, 7); c.fillStyle = "#7c86b0"; c.fill(); }
+    // Head.
+    rr(x - 80, y - 54, 160, 108, 34); c.fillStyle = lin(0, y - 54, 0, y + 54, [[0, "#dfe4f5"], [1, "#a9b2d6"]]); c.fill();
+    rr(x - 66, y - 40, 132, 80, 24); c.fillStyle = "#1c2242"; c.fill();
+    // Face on the visor.
+    const eyeY = y - 8, mood = state.mood;
+    for (const s of [-1, 1]) {
+      if (mood === "happy") { c.beginPath(); c.arc(x + s * 28, eyeY + 4, 11, Math.PI * 1.1, Math.PI * 1.9); c.lineWidth = 5; c.strokeStyle = "#7df9ff"; c.lineCap = "round"; c.stroke(); }
+      else if (mood === "sad") { c.beginPath(); c.moveTo(x + s * 28 - 10, eyeY - 2 - s * 0); c.lineTo(x + s * 28 + 10, eyeY + 2 * -s); c.lineWidth = 5; c.strokeStyle = "#ff8a8a"; c.lineCap = "round"; c.stroke(); }
+      else { const sh = (t % 3.4) < 0.14 ? 2 : 12; rr(x + s * 28 - 9, eyeY - sh / 2, 18, sh, 6); c.fillStyle = "#7df9ff"; c.fill(); }
+    }
+    c.beginPath(); c.lineWidth = 4; c.lineCap = "round"; c.strokeStyle = mood === "sad" ? "#ff8a8a" : "#7df9ff";
+    if (mood === "happy") c.arc(x, y + 14, 12, 0.15 * Math.PI, 0.85 * Math.PI);
+    else if (mood === "sad") c.arc(x, y + 28, 10, 1.2 * Math.PI, 1.8 * Math.PI);
+    else { c.moveTo(x - 10, y + 20); c.lineTo(x + 10, y + 20); }
+    c.stroke();
+    dot(x - 50, y + 18, 6, "rgba(255,120,150,0.35)"); dot(x + 50, y + 18, 6, "rgba(255,120,150,0.35)");
+  }
+  function drawHud() {
+    rr(12, 12, 336, 34, 17); c.fillStyle = "rgba(0,0,0,0.3)"; c.fill();
+    c.font = "700 16px Fredoka, sans-serif"; c.fillStyle = "#e8ecff"; c.textAlign = "left"; c.fillText(`Card ${state.card}`, 26, 35);
+    for (let i = 0; i < 3; i++) { if (i < state.lives) heart(244 + i * 20, 29, 8, "#ff5d73"); else { c.beginPath(); c.arc(244 + i * 20, 29, 6, 0, TAU); c.lineWidth = 1.5; c.strokeStyle = "rgba(255,255,255,0.35)"; c.stroke(); } }
+    c.textAlign = "right"; c.fillStyle = "#e8ecff"; c.fillText(state.score, 334, 35);
+  }
+  function drawScreen() {
+    const card = state.cur, x = 20, y = 176, w = 320, h = 270;
+    rr(x - 6, y - 6, w + 12, h + 12, 30); c.fillStyle = "#8d96bf"; c.fill();
+    rr(x, y, w, h, 24); c.fillStyle = rad(180, y + 110, 20, 220, [[0, "#26305e"], [1, "#141938"]]); c.fill();
+    // Scan lines.
+    c.fillStyle = "rgba(255,255,255,0.025)"; for (let ly = y + 4; ly < y + h; ly += 6) c.fillRect(x + 6, ly, w - 12, 2);
+    if (!card) return;
+    let top = y + 62;
+    const fontSize = 30;
+    c.textAlign = "left"; c.textBaseline = "alphabetic";
+    for (const line of card.lines) {
+      c.font = `700 ${fontSize}px Fredoka, sans-serif`;
+      let width = line.reduce((s, [txt]) => s + c.measureText(txt).width, 0);
+      if (width > 288) { c.font = `700 ${Math.floor(fontSize * 288 / width)}px Fredoka, sans-serif`; width = line.reduce((s, [txt]) => s + c.measureText(txt).width, 0); }
+      let lx = 180 - width / 2;
+      for (const [txt, key] of line) {
+        c.fillStyle = key ? COLORS[key].text : "#eef1ff";
+        c.shadowColor = key ? COLORS[key].face : "rgba(160,190,255,0.6)"; c.shadowBlur = 10;
+        c.fillText(txt, lx, top); lx += c.measureText(txt).width;
+      }
+      c.shadowBlur = 0;
+      top += fontSize + 8;
+    }
+    const midY = top + 36;
+    if (card.quote) { c.font = "600 26px Fredoka, sans-serif"; c.textAlign = "center"; c.fillStyle = "#ffe9a8"; c.fillText(card.quote, 180, top + 22); }
+    if (card.shape) { c.beginPath(); for (let i = 0; i < card.shape; i++) { const a = -Math.PI / 2 + i * TAU / card.shape + (card.shape === 4 ? Math.PI / 4 : 0); c.lineTo(180 + Math.cos(a) * 40, midY + Math.sin(a) * 40); } c.closePath(); c.fillStyle = "#eef1ff"; c.shadowColor = "#9db4ff"; c.shadowBlur = 14; c.fill(); c.shadowBlur = 0; }
+    if (card.blob) { dot(180, midY, 38, COLORS[card.blob].face); dot(168, midY - 12, 10, "rgba(255,255,255,0.4)"); }
+    if (card.big) { c.font = "700 72px Fredoka, sans-serif"; c.textAlign = "center"; c.fillStyle = "#ffffff"; c.shadowColor = "#9db4ff"; c.shadowBlur = 14; c.fillText(card.big, 180, midY + 26); c.shadowBlur = 0; }
+    if (card.inkWord) { const [word, ink] = card.inkWord; c.font = "700 54px Fredoka, sans-serif"; c.textAlign = "center"; c.fillStyle = COLORS[ink].face; c.fillText(COLORS[word].name, 180, midY + 20); }
+    if (card.small) { c.font = "600 16px Fredoka, sans-serif"; c.textAlign = "center"; c.fillStyle = "#9ba8d8"; c.fillText(card.small, 180, y + h - 34); }
+    if (card.star) { star(x + w - 34, y + 34, 20, "#fcd34d"); }
+    // The time bar.
+    const frac = state.phase === "card" ? Math.max(0, card.left / card.time) : 0;
+    rr(x + 24, y + h - 20, w - 48, 8, 4); c.fillStyle = "rgba(255,255,255,0.12)"; c.fill();
+    if (frac > 0) { rr(x + 24, y + h - 20, (w - 48) * frac, 8, 4); c.fillStyle = frac < 0.3 ? "#ff7a7a" : "#7df9ff"; c.fill(); }
+    // The hold bar.
+    if (card.hold && state.phase === "card") { const hf = Math.min(1, card.held / card.holdFor); rr(70, midY - 10, 220, 22, 11); c.fillStyle = "rgba(255,255,255,0.12)"; c.fill(); if (hf > 0) { rr(70, midY - 10, 220 * hf, 22, 11); c.fillStyle = COLORS[card.hold].face; c.fill(); } }
+    // Verdict.
+    if (state.phase === "verdict") {
+      rr(x + 10, y + 10, w - 20, h - 20, 18); c.fillStyle = "rgba(10,12,30,0.82)"; c.fill();
+      c.textAlign = "center";
+      if (state.verdict) { c.font = "700 40px Fredoka, sans-serif"; c.fillStyle = "#4ade80"; c.fillText("✓ Right!", 180, y + 140); }
+      else { c.font = "700 34px Fredoka, sans-serif"; c.fillStyle = "#ff7a7a"; c.fillText("Oops!", 180, y + 110); c.font = "600 20px Fredoka, sans-serif"; c.fillStyle = "#eef1ff"; c.fillText("It was:", 180, y + 146); c.font = "700 22px Fredoka, sans-serif"; c.fillText(card.want, 180, y + 176); }
+    }
+  }
+  function drawPanel() {
+    rr(10, 470, 340, 160, 30); c.fillStyle = lin(0, 470, 0, 630, [[0, "#3a4070"], [1, "#262a4d"]]); c.fill();
+    rr(10, 470, 340, 8, 4); c.fillStyle = "rgba(255,255,255,0.1)"; c.fill();
+    for (let i = 0; i < 3; i++) {
+      const key = state.slots[i], col = COLORS[key];
+      const x = slotX(i), down = state.pressed[key] ? 6 : 0;
+      const pop = 1 - Math.pow(1 - state.slotAnim, 3);
+      const y = BTN_Y + (1 - pop) * 20;
+      // Base ring.
+      c.beginPath(); c.ellipse(x, y + 16, BTN_R + 10, 22, 0, 0, TAU); c.fillStyle = "#14172e"; c.fill();
+      c.beginPath(); c.ellipse(x, y + 10, BTN_R + 10, 22, 0, 0, TAU); c.fillStyle = "#555d8c"; c.fill();
+      // Button side and dome.
+      c.beginPath(); c.ellipse(x, y + 12, BTN_R, 20, 0, 0, Math.PI); c.lineTo(x - BTN_R, y + down - 2); c.ellipse(x, y + down - 2, BTN_R, 20, 0, Math.PI, TAU); c.closePath(); c.fillStyle = col.edge; c.fill();
+      c.beginPath(); c.ellipse(x, y + down - 4, BTN_R, 22, 0, 0, TAU); c.fillStyle = rad(x - 14, y + down - 14, 4, BTN_R + 6, [[0, "#ffffff"], [0.18, col.face], [1, col.low]]); c.fill();
+      c.beginPath(); c.ellipse(x - 12, y + down - 12, 14, 6, -0.3, 0, TAU); c.fillStyle = "rgba(255,255,255,0.35)"; c.fill();
+      c.font = "700 13px Fredoka, sans-serif"; c.textAlign = "center"; c.fillStyle = "#c9cff0"; c.fillText(col.name, x, 616);
+    }
+  }
+  function draw() {
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawRoom(); drawHud(); drawRobot(); drawScreen(); drawPanel();
+    if (state.phase === "over") {
+      c.fillStyle = "rgba(10,12,30,0.8)"; c.fillRect(0, 0, W, H);
+      c.textAlign = "center"; c.fillStyle = "#eef1ff"; c.font = "700 34px Fredoka, sans-serif"; c.fillText("Game over", 180, 280);
+      c.font = "600 19px Fredoka, sans-serif"; c.fillText(`${state.card} cards · score ${state.score}`, 180, 318); c.fillText("tap to play again", 180, 352);
+    }
+  }
+  function frame(now) { const dt = Math.min(0.05, (now - last) / 1000); last = now; t += dt; step(dt); draw(); requestAnimationFrame(frame); }
+  reset(Number(new URLSearchParams(location.search).get("card")) || 1);
+  requestAnimationFrame(frame);
+  document.getElementById("restart").onclick = () => reset(1);
+  document.getElementById("jump").onclick = () => reset(10);
+})();
+</script>
+</body>
+</html>
