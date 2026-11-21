@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="robots" content="noindex, nofollow">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Button Bot draft 3</title>
+<title>Button Bot draft 4</title>
 <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
   :root { --bg: #0e1024; --text: #f4f1ec; --muted: #9ba3be; }
@@ -24,11 +24,11 @@
 <body>
 <main>
   <div class="intro">
-    <h1>Button Bot · taslak 3</h1>
+    <h1>Button Bot · taslak 4</h1>
     <ul>
       <li>İki tuş: <b>KIRMIZI</b> ve <b>MAVİ</b>. Klavyede sol tuş <b>A</b> ya da ←, sağ tuş <b>D</b> ya da →. Telefonda iki tuşa aynı anda basılabilir.</li>
-      <li>Her turda robot bir talimat verir. Doğruysa tur hemen biter. “Tam 3 kez” ya da “hiçbir şeye basma” gibi kartlar süre bitince geçer; fazla basarsan hemen kaybedersin.</li>
-      <li>Tur 1–5 temel kurallar, 6–15 tuzaklar (renk tuzağı, sıra, basılı tutma, sayma, matematik), 16 ve sonrası hafıza, tuş değişimi, bas-tut-dokun, son saniye. 3 can; yanlışta nedeni yazılır.</li>
+      <li>Her tur süre bitene kadar sürer; doğru yaptın mı söylenmez. Görevi bitirdikten sonra bir daha basarsan o da yanlış sayılır.</li>
+      <li><b>Tek yanlışta oyun biter</b> ve nedeni yazılır. Tur 1–5 temel, 6–15 tuzaklar, 16 ve sonrası hafıza, tuş değişimi, bas-tut-dokun, son saniye, ⭐ kuralı.</li>
     </ul>
   </div>
   <div class="phone"><canvas id="board" width="360" height="640"></canvas></div>
@@ -62,22 +62,21 @@
   const fail = (why) => "FAIL:" + why;
 
   // --- Rules ----------------------------------------------------------------------------------
-  // A rule makes an instance from the round context. An instance has prompt lines, optional
-  // visuals, extra time, and handlers that return "PASS", "CONTINUE", or "FAIL:<reason>":
-  // onPress(key, s), onRelease(key, s), onTick(s), and onTimeout(s).
+  // A rule makes an instance from the round context. Handlers return "PASS", "CONTINUE", or
+  // "FAIL:<reason>": onPress(key, s), onRelease(key, s), onTick(s), onTimeout(s). A PASS only
+  // marks the task done: the round still runs to the end of its time, the player is not
+  // told, and any press after that is a mistake.
   const pressColor = (c, extra) => Object.assign({
     onPress: (k) => (k === c ? "PASS" : fail(`Pressed ${N(k)} instead of ${N(c)}`)),
-    onTimeout: () => fail("Too slow"),
+    onTimeout: () => fail(`Time ran out: it was ${N(c)}`),
   }, extra);
   const exactly = (c, n) => ({
     onPress: (k, s) => {
       if (k !== c) return fail(`Pressed ${N(k)} instead of ${N(c)}`);
       if (s.count[c] > n) return fail(`Too many: ${s.count[c]} presses, wanted ${n}`);
-      if (s.count[c] === n) s.left = Math.min(s.left, 0.8);
       return "CONTINUE";
     },
     onTimeout: (s) => (s.count[c] === n ? "PASS" : fail(`Only ${s.count[c]} of ${n} presses`)),
-    counter: c,
   });
   const RULES = [
     { id: "press", tier: 1, make: () => { const c = pick(KEYS); return pressColor(c, { lines: [[T("Press "), C(c)]] }); } },
@@ -88,10 +87,10 @@
       lines: [[T("Press BOTH")], [T("buttons together")]],
       onPress: (k, s) => (s.down[other(k)] || s.elapsed - s.lastPress[other(k)] < 0.15 ? "PASS" : "CONTINUE"),
       onTick: (s) => { for (const k of KEYS) if (s.count[k] && !s.count[other(k)] && !s.down[k] && s.elapsed - s.lastPress[k] > 0.15) return fail(`Only ${N(k)} was pressed`); return "CONTINUE"; },
-      onTimeout: () => fail("Too slow") }) },
+      onTimeout: () => fail("Time ran out: press both together") }) },
     { id: "exact", tier: 1, make: () => { const c = pick(KEYS), n = between(2, 4); return Object.assign(exactly(c, n), { lines: [[T("Press "), C(c)], [T(`exactly ${n} times`)]], time: 0.5 }); } },
     { id: "position", tier: 1, make: (ctx) => { const i = between(0, 1), word = ["LEFT", "RIGHT"][i], c = ctx.slots[i]; return { lines: [[T("Press the")], [T(`${word} button`)]],
-      onPress: (k) => (k === c ? "PASS" : fail(`That was the ${i ? "LEFT" : "RIGHT"} button`)), onTimeout: () => fail("Too slow") }; } },
+      onPress: (k) => (k === c ? "PASS" : fail(`That was the ${i ? "LEFT" : "RIGHT"} button`)), onTimeout: () => fail(`Time ran out: it was the ${word} button`) }; } },
 
     { id: "stroopText", tier: 2, make: () => { const c = pick(KEYS); return pressColor(c, { lines: [[INK("Press ", other(c)), INK(N(c), other(c))]], small: "do what it SAYS" }); } },
     { id: "stroopColor", tier: 2, make: () => { const w = pick(KEYS), ink = other(w); return pressColor(ink, { lines: [[T("Press the COLOUR")], [T("of this word:")]], inkWord: [N(w), ink] }); } },
@@ -129,7 +128,7 @@
     { id: "holdTap", tier: 3, make: () => { const c = pick(KEYS), o = other(c); return { lines: [[T("Hold "), C(c), T(" and")], [T("tap "), C(o), T(" twice")]], time: 1.2,
       onPress: (k, s) => { if (k === c) return "CONTINUE"; if (!s.down[c]) return fail(`Tapped ${N(o)} without holding ${N(c)}`); return s.count[o] >= 2 ? "PASS" : "CONTINUE"; },
       onRelease: (k, s) => (k === c && s.count[o] < 2 ? fail(`Let go of ${N(c)} too early`) : "CONTINUE"),
-      onTimeout: () => fail("Too slow") }; } },
+      onTimeout: () => fail("Time ran out") }; } },
     { id: "lastSecond", tier: 3, make: () => { const c = pick(KEYS); return { lines: [[T("Press "), C(c), T(" only in")], [T("the last second")]], small: "wait for the red zone", zone: 1, time: 0.6,
       onPress: (k, s) => { if (s.left > 1.0) return fail(`Too early: ${s.left.toFixed(1)} s were left`); return k === c ? "PASS" : fail(`Pressed ${N(k)} instead of ${N(c)}`); },
       onTimeout: () => fail("Too late") }; } },
@@ -146,21 +145,20 @@
 
   function newGame(startRound) {
     rand = mulberry(Math.floor(Math.random() * 1e9));
-    game = { phase: "menu", round: (startRound || 1) - 1, lives: 3, score: 0, streak: 0, slots: KEYS.slice(), slotX: { R: SLOT_X[0], B: SLOT_X[1] },
-      last: null, lastId: null, rule: null, inst: null, s: null, verdict: null, why: "", wait: 0, mood: "wait", shake: 0, flash: 0, flashColor: "", parts: [], pulse: 0,
-      pressed: game ? game.pressed : { R: false, B: false }, beat: 0, overWait: 0, record: false };
+    game = { phase: "menu", round: (startRound || 1) - 1, score: 0, slots: KEYS.slice(), slotX: { R: SLOT_X[0], B: SLOT_X[1] },
+      last: null, lastId: null, rule: null, inst: null, s: null, why: "", mood: "wait", shake: 0, flash: 0, parts: [], ripples: [], pulse: 0, enter: 1,
+      pressed: game ? game.pressed : { R: false, B: false }, look: 0, beat: 0, overWait: 0, record: false };
   }
   function start() { game.phase = "play"; nextRound(); }
   function swapSlots() { game.slots = game.slots.slice().reverse(); }
   function tierOf(round) { return round <= 5 ? 1 : round <= 15 ? 2 : 3; }
-  function baseTime(round) { const tier = tierOf(round); return tier === 1 ? 4.5 : tier === 2 ? 4.2 : Math.max(2.8, 3.9 - (round - 16) * 0.05); }
+  function baseTime(round) { const tier = tierOf(round); return tier === 1 ? 5.5 : tier === 2 ? 5.0 : Math.max(3.4, 4.6 - (round - 16) * 0.05); }
 
   function nextRound() {
     game.round++;
     const tier = tierOf(game.round);
     const ctx = { round: game.round, last: game.last, slots: game.slots, rule: game.rule };
     let pool = RULES.filter((r) => r.tier <= tier && r.id !== game.lastId && (!r.ok || r.ok(ctx)));
-    // A new tier shows its own rules more often.
     const top = pool.filter((r) => r.tier === tier);
     if (tier > 1 && top.length && rand() < 0.6) pool = top;
     const rule = pick(pool);
@@ -169,41 +167,49 @@
     // A standing rule: a star on a card overrides what the card says.
     if (game.rule && rule.id !== "starRule" && rand() < 0.22) {
       const k = game.rule;
-      Object.assign(inst, { star: true, onPress: (key) => (key === k ? "PASS" : fail(`⭐ means ${N(k)}`)), onRelease: null, onTick: null, onTimeout: () => fail(`⭐ means press ${N(k)}`), zone: 0, hold: null, counter: null });
+      Object.assign(inst, { star: true, onPress: (key) => (key === k ? "PASS" : fail(`⭐ means ${N(k)}`)), onRelease: null, onTick: null, onTimeout: () => fail(`⭐ means press ${N(k)}`), zone: 0, hold: null });
     }
-    inst.total = Math.max(2.4, baseTime(game.round) + (inst.time || 0));
+    inst.total = Math.max(3, baseTime(game.round) + (inst.time || 0));
     game.inst = inst;
     game.lastId = rule.id;
-    game.s = { down: { R: false, B: false }, count: { R: 0, B: 0 }, seq: [], downAt: { R: 0, B: 0 }, lastPress: { R: -9, B: -9 }, elapsed: 0, left: inst.total };
-    game.phase = "play";
-    game.mood = "wait";
+    game.s = { down: { R: false, B: false }, count: { R: 0, B: 0 }, seq: [], downAt: { R: 0, B: 0 }, lastPress: { R: -9, B: -9 }, elapsed: 0, left: inst.total, done: false };
+    game.phase = "play"; game.mood = "wait"; game.enter = 0;
   }
 
+  // A handler's answer. A pass marks the task done quietly; a fail ends the game at once.
   function resolve(result) {
     if (!result || result === "CONTINUE" || game.phase !== "play") return;
-    const ok = result === "PASS";
+    if (result === "PASS") { game.s.done = true; return; }
+    gameOver(result.slice(5));
+  }
+  function roundPassed() {
     const s = game.s, distinct = [...new Set(s.seq)];
-    game.last = { id: game.inst.id, single: distinct.length === 1 ? distinct[0] : null, passed: ok };
-    game.phase = "feedback"; game.verdict = ok; game.why = ok ? "" : result.slice(5);
-    game.wait = ok ? 0.8 : 1.9;
-    game.mood = ok ? "happy" : "sad";
-    game.flash = 1; game.flashColor = ok ? "rgba(61,220,132," : "rgba(255,77,94,";
-    if (ok) {
-      game.score++; game.streak++; sound("pass"); burst();
-      if (game.streak % 5 === 0) { game.pulse = 1; sound("streak"); }
-    } else { game.lives--; game.streak = 0; game.shake = 1; sound("fail"); }
+    game.last = { id: game.inst.id, single: distinct.length === 1 ? distinct[0] : null };
+    game.score++;
+    sound("next");
+    if (game.score % 5 === 0) { game.pulse = 1; sound("streak"); burst(180, 300, 30); }
+    nextRound();
+  }
+  function gameOver(why) {
+    game.phase = "over"; game.why = why; game.mood = "sad"; game.shake = 1; game.flash = 1; game.overWait = 1.2;
+    sound("fail");
+    if (game.score > best) { best = game.score; game.record = true; try { localStorage.setItem("buttonbot.best", String(best)); } catch (e) { /* private mode */ } }
   }
 
   // --- Input -------------------------------------------------------------------------------------
   function press(key) {
     if (game.pressed[key]) return;
     game.pressed[key] = true;
+    const x = game.slotX[key];
+    game.ripples.push({ x, y: BTN_Y, life: 1, key });
+    game.look = x < 180 ? -1 : 1;
     sound(key === "R" ? "pressR" : "pressB");
     if (game.phase === "menu") { start(); return; }
     if (game.phase === "over") { if (game.overWait <= 0) { newGame(1); start(); } return; }
     if (game.phase !== "play") return;
     const s = game.s;
     s.down[key] = true; s.count[key]++; s.seq.push(key); s.downAt[key] = s.elapsed; s.lastPress[key] = s.elapsed;
+    if (s.done) { gameOver(`Pressed ${N(key)} after the task was done`); return; }
     resolve(game.inst.onPress ? game.inst.onPress(key, s) : "CONTINUE");
   }
   function release(key) {
@@ -211,7 +217,7 @@
     game.pressed[key] = false;
     if (game.phase !== "play" || !game.s.down[key]) return;
     game.s.down[key] = false;
-    if (game.inst.onRelease) resolve(game.inst.onRelease(key, game.s));
+    if (!game.s.done && game.inst.onRelease) resolve(game.inst.onRelease(key, game.s));
   }
   function keyAt(x, y) { for (let i = 0; i < 2; i++) if (Math.hypot(x - SLOT_X[i], y - BTN_Y) < BTN_R + 14) return game.slots[i]; return null; }
   const pointers = {};
@@ -239,27 +245,27 @@
   // --- Update -------------------------------------------------------------------------------------
   function step(dt) {
     for (let i = 0; i < 2; i++) { const k = game.slots[i]; game.slotX[k] += (SLOT_X[i] - game.slotX[k]) * Math.min(1, dt * 9); }
-    game.shake = Math.max(0, game.shake - dt * 3); game.flash = Math.max(0, game.flash - dt * 2.5); game.pulse = Math.max(0, game.pulse - dt * 1.2);
+    game.shake = Math.max(0, game.shake - dt * 2.5); game.flash = Math.max(0, game.flash - dt * 2); game.pulse = Math.max(0, game.pulse - dt * 1.2);
+    game.enter = Math.min(1, game.enter + dt / 0.3);
+    game.look *= Math.pow(0.1, dt);
     for (const p of game.parts) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 420 * dt; p.life -= dt; }
     game.parts = game.parts.filter((p) => p.life > 0);
+    for (const r of game.ripples) r.life -= dt * 2.2;
+    game.ripples = game.ripples.filter((r) => r.life > 0);
     if (game.phase === "play") {
       const s = game.s, inst = game.inst;
       const before = s.left;
       s.elapsed += dt; s.left -= dt;
-      // Ticks in the last three seconds, and a heartbeat in the last one.
       if (Math.ceil(before) !== Math.ceil(s.left) && s.left > 0 && s.left < 3) sound("tick");
       if (s.left < 1.2) { game.beat -= dt; if (game.beat <= 0) { sound("beat"); game.beat = 0.45; } }
-      if (inst.onTick) resolve(inst.onTick(s));
-      if (game.phase === "play" && s.left <= 0) resolve(inst.onTimeout(s));
-    } else if (game.phase === "feedback") {
-      game.wait -= dt;
-      if (game.wait <= 0) {
-        if (game.lives <= 0) { game.phase = "over"; game.overWait = 0.8; if (game.score > best) { best = game.score; game.record = true; try { localStorage.setItem("buttonbot.best", String(best)); } catch (e) { /* private mode */ } } }
-        else nextRound();
+      if (!s.done && inst.onTick) resolve(inst.onTick(s));
+      if (game.phase === "play" && s.left <= 0) {
+        if (s.done) roundPassed();
+        else { const r = inst.onTimeout(s); if (r === "PASS") roundPassed(); else resolve(r); }
       }
     } else if (game.phase === "over") game.overWait -= dt;
   }
-  function burst() { for (let i = 0; i < 28; i++) { const a = rand() * TAU, v = 120 + rand() * 220; game.parts.push({ x: 180, y: 300, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 160, life: 0.9 + rand() * 0.4, color: pick(["#ff4d5e", "#3d8bff", "#ffd23f", "#3ddc84", "#ffffff"]), size: 3 + rand() * 4, spin: rand() * TAU }); } }
+  function burst(x, y, n) { for (let i = 0; i < n; i++) { const a = rand() * TAU, v = 120 + rand() * 220; game.parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 160, life: 0.9 + rand() * 0.4, color: pick(["#ff4d5e", "#3d8bff", "#ffd23f", "#3ddc84", "#ffffff"]), size: 3 + rand() * 4, spin: rand() * TAU }); } }
 
   // --- Sound (Web Audio, synthesized) ---------------------------------------------------------------
   let audio = null;
@@ -277,9 +283,9 @@
       case "pressB": tone(494, 0.08, "square", 0.08, 330); break;
       case "tick": tone(1200, 0.04, "sine", 0.06); break;
       case "beat": tone(70, 0.12, "sine", 0.35, 50); tone(70, 0.1, "sine", 0.25, 50, 0.14); break;
-      case "pass": tone(784, 0.12, "triangle", 0.18); tone(1175, 0.2, "triangle", 0.16, null, 0.08); break;
-      case "streak": [784, 988, 1175, 1568].forEach((f, i) => tone(f, 0.14, "triangle", 0.14, null, 0.2 + i * 0.07)); break;
-      case "fail": tone(180, 0.35, "sawtooth", 0.14, 90); tone(120, 0.35, "square", 0.08, 70); break;
+      case "next": tone(660, 0.1, "triangle", 0.1); break;
+      case "streak": [784, 988, 1175, 1568].forEach((f, i) => tone(f, 0.14, "triangle", 0.14, null, 0.1 + i * 0.07)); break;
+      case "fail": tone(180, 0.45, "sawtooth", 0.14, 70); tone(120, 0.45, "square", 0.08, 50); break;
     }
   }
   function toggleMute() { muted = !muted; document.getElementById("mute").textContent = muted ? "Ses: kapalı" : "Ses: açık"; }
@@ -289,78 +295,90 @@
   function rr(x, y, w, h, r) { c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); }
   const lin = (x0, y0, x1, y1, st) => { const g = c.createLinearGradient(x0, y0, x1, y1); st.forEach(([o, col]) => g.addColorStop(o, col)); return g; };
   const rad = (x, y, r0, r1, st) => { const g = c.createRadialGradient(x, y, r0, x, y, r1); st.forEach(([o, col]) => g.addColorStop(o, col)); return g; };
-  function heart(x, y, s, f) { c.beginPath(); for (let i = 0; i < 30; i++) { const k = i * TAU / 30; c.lineTo(x + 16 * Math.pow(Math.sin(k), 3) * s / 16, y - (13 * Math.cos(k) - 5 * Math.cos(2 * k) - 2 * Math.cos(3 * k) - Math.cos(4 * k)) * s / 16); } c.closePath(); c.fillStyle = f; c.fill(); }
   function star(x, y, r) { c.beginPath(); for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, d = i % 2 ? r * 0.45 : r; c.lineTo(x + Math.cos(a) * d, y + Math.sin(a) * d); } c.closePath(); c.fillStyle = "#ffd23f"; c.shadowColor = "#ffb800"; c.shadowBlur = 16; c.fill(); c.shadowBlur = 0; c.lineWidth = 2; c.strokeStyle = "#c98500"; c.stroke(); }
   function shape(kind, x, y, r, fill) {
     c.beginPath();
     if (kind === "circle") c.arc(x, y, r, 0, TAU);
     else if (kind === "square") rr(x - r * 0.88, y - r * 0.88, r * 1.76, r * 1.76, 4);
     else { c.moveTo(x, y - r * 1.05); c.lineTo(x + r, y + r * 0.75); c.lineTo(x - r, y + r * 0.75); c.closePath(); }
-    c.fillStyle = fill; c.shadowColor = fill; c.shadowBlur = 10; c.fill(); c.shadowBlur = 0;
-    c.lineWidth = 2; c.strokeStyle = "rgba(255,255,255,0.35)"; c.stroke();
+    c.fillStyle = fill; c.shadowColor = fill; c.shadowBlur = 12; c.fill(); c.shadowBlur = 0;
+    c.lineWidth = 2; c.strokeStyle = "rgba(255,255,255,0.4)"; c.stroke();
   }
+  const timeColor = (f) => (f > 0.55 ? "#3ddc84" : f > 0.25 ? "#ffd23f" : "#ff4d5e");
   const bokeh = Array.from({ length: 14 }, (_, i) => ({ x: (i * 83) % W, y: 60 + (i * 137) % 420, r: 18 + (i * 7) % 30, sp: 0.2 + (i % 5) * 0.08, hue: ["255,77,94", "61,139,255", "160,110,255", "61,220,200"][i % 4] }));
+  const stars = Array.from({ length: 40 }, (_, i) => ({ x: (i * 47 + 13) % W, y: (i * 89 + 7) % 460, r: 0.6 + (i % 3) * 0.5, ph: i * 1.7 }));
 
   // --- Scene ------------------------------------------------------------------------------------------
   function drawBackground() {
-    c.fillStyle = rad(180, 260, 20, 520, [[0, "#2b2468"], [0.5, "#17163d"], [1, "#0a0a1e"]]); c.fillRect(0, 0, W, H);
-    for (const b of bokeh) { const y = ((b.y - t * b.sp * 14) % 640 + 640) % 640; c.fillStyle = rad(b.x, y, 0, b.r, [[0, `rgba(${b.hue},0.18)`], [1, `rgba(${b.hue},0)`]]); c.fillRect(b.x - b.r, y - b.r, b.r * 2, b.r * 2); }
-    c.strokeStyle = "rgba(140,150,255,0.08)"; c.lineWidth = 1;
-    for (let i = -8; i <= 8; i++) { c.beginPath(); c.moveTo(180 + i * 12, 470); c.lineTo(180 + i * 70, 640); c.stroke(); }
-    for (let y = 480; y < 640; y += 16 + (y - 480) * 0.25) { c.beginPath(); c.moveTo(0, y); c.lineTo(W, y); c.stroke(); }
+    c.fillStyle = rad(180, 280, 20, 560, [[0, "#2e2670"], [0.5, "#181640"], [1, "#08081a"]]); c.fillRect(-20, -20, W + 40, H + 40);
+    for (const s of stars) dot(s.x, s.y, s.r, `rgba(255,255,255,${0.25 + 0.35 * (0.5 + 0.5 * Math.sin(t * 1.6 + s.ph))})`);
+    for (const b of bokeh) { const y = ((b.y - t * b.sp * 14) % 640 + 640) % 640; c.fillStyle = rad(b.x, y, 0, b.r, [[0, `rgba(${b.hue},0.16)`], [1, `rgba(${b.hue},0)`]]); c.fillRect(b.x - b.r, y - b.r, b.r * 2, b.r * 2); }
+    // A neon floor under the buttons.
+    const hz = 470;
+    c.fillStyle = lin(0, hz, 0, H, [[0, "rgba(120,90,255,0.18)"], [1, "rgba(20,10,60,0)"]]); c.fillRect(0, hz, W, H - hz);
+    c.strokeStyle = "rgba(160,140,255,0.13)"; c.lineWidth = 1;
+    for (let i = -10; i <= 10; i++) { c.beginPath(); c.moveTo(180 + i * 10, hz); c.lineTo(180 + i * 72, H); c.stroke(); }
+    const off = (t * 18) % 20;
+    for (let k = 0; k < 9; k++) { const y = hz + Math.pow((k * 20 + off) / 180, 1.8) * 170; c.beginPath(); c.moveTo(0, y); c.lineTo(W, y); c.stroke(); }
+    c.fillStyle = rad(180, 320, 200, 460, [[0, "rgba(0,0,0,0)"], [1, "rgba(0,0,0,0.55)"]]); c.fillRect(-20, -20, W + 40, H + 40);
   }
   function drawHud() {
-    for (let i = 0; i < 3; i++) { if (i < game.lives) heart(30 + i * 24, 30, 9, "#ff4d6d"); else { c.beginPath(); c.arc(30 + i * 24, 29, 7, 0, TAU); c.lineWidth = 1.6; c.strokeStyle = "rgba(255,255,255,0.3)"; c.stroke(); } }
-    rr(130, 14, 100, 30, 15); c.fillStyle = "rgba(255,255,255,0.08)"; c.fill();
-    c.font = "700 15px Fredoka, sans-serif"; c.textAlign = "center"; c.fillStyle = "#cfd5ff"; c.fillText(`ROUND ${Math.max(1, game.round)}`, 180, 35);
-    c.textAlign = "right"; c.font = "700 22px Fredoka, sans-serif"; c.fillStyle = "#ffffff"; c.fillText(game.score, 336, 37);
+    c.font = "700 14px Fredoka, sans-serif"; c.textAlign = "left"; c.fillStyle = "#9ea8e6"; c.fillText(`BEST ${best}`, 22, 36);
+    rr(128, 14, 104, 30, 15); c.fillStyle = "rgba(255,255,255,0.08)"; c.fill(); c.lineWidth = 1; c.strokeStyle = "rgba(255,255,255,0.12)"; c.stroke();
+    c.font = "700 15px Fredoka, sans-serif"; c.textAlign = "center"; c.fillStyle = "#e3e7ff"; c.fillText(`ROUND ${Math.max(1, game.round)}`, 180, 35);
+    c.textAlign = "right"; c.font = "700 24px Fredoka, sans-serif"; c.fillStyle = "#ffffff"; c.shadowColor = "rgba(150,170,255,0.8)"; c.shadowBlur = 10; c.fillText(game.score, 338, 38); c.shadowBlur = 0;
   }
   function drawTimer() {
     const inst = game.inst, s = game.s, x = 20, y = 56, w = 320, h = 14;
-    rr(x, y, w, h, 7); c.fillStyle = "rgba(255,255,255,0.1)"; c.fill();
+    rr(x, y, w, h, 7); c.fillStyle = "rgba(255,255,255,0.08)"; c.fill(); c.lineWidth = 1; c.strokeStyle = "rgba(255,255,255,0.12)"; c.stroke();
     if (!inst || game.phase === "menu") return;
-    const frac = game.phase === "over" ? 0 : Math.max(0, s.left / inst.total);
-    if (inst.zone) { rr(x, y, w * (1 / inst.total), h, 7); c.fillStyle = "rgba(255,77,94,0.4)"; c.fill(); }
-    const col = frac > 0.55 ? "#3ddc84" : frac > 0.25 ? "#ffd23f" : "#ff4d5e";
-    if (frac > 0) { rr(x, y, Math.max(h, w * frac), h, 7); c.fillStyle = col; c.shadowColor = col; c.shadowBlur = 12; c.fill(); c.shadowBlur = 0; rr(x + 4, y + 2, Math.max(0, w * frac - 8), 4, 2); c.fillStyle = "rgba(255,255,255,0.35)"; c.fill(); }
+    const frac = Math.max(0, s.left / inst.total);
+    if (inst.zone) { rr(x, y, w * (1 / inst.total), h, 7); c.fillStyle = "rgba(255,77,94,0.45)"; c.fill(); }
+    const col = timeColor(frac);
+    if (frac > 0) { rr(x, y, Math.max(h, w * frac), h, 7); c.fillStyle = col; c.shadowColor = col; c.shadowBlur = 14; c.fill(); c.shadowBlur = 0; rr(x + 4, y + 2, Math.max(0, w * frac - 8), 4, 2); c.fillStyle = "rgba(255,255,255,0.4)"; c.fill(); }
   }
   function drawBot() {
-    const x = 180, y = 123 + Math.sin(t * 2.2) * 2, mood = game.mood;
-    c.strokeStyle = "#a9b3e6"; c.lineWidth = 3; c.beginPath(); c.moveTo(x, y - 30); c.quadraticCurveTo(x + 6, y - 38, x, y - 44); c.stroke();
-    const bulb = mood === "happy" ? "#3ddc84" : mood === "sad" ? "#ff4d5e" : Math.sin(t * 5) > 0 ? "#ffd23f" : "#a77d10";
-    dot(x, y - 46, 12, rad(x, y - 46, 0, 12, [[0, bulb], [1, "rgba(0,0,0,0)"]])); dot(x, y - 46, 5, bulb);
-    for (const s of [-1, 1]) { rr(x + s * 58 - 7, y - 10, 14, 22, 6); c.fillStyle = "#8f98d0"; c.fill(); }
-    rr(x - 54, y - 32, 108, 66, 26); c.fillStyle = lin(0, y - 32, 0, y + 34, [[0, "#eef1ff"], [1, "#aab3e3"]]); c.fill();
-    rr(x - 44, y - 23, 88, 46, 18); c.fillStyle = "#151a3d"; c.fill();
-    const eye = mood === "sad" ? "#ff8a94" : mood === "happy" ? "#5cf0a8" : "#7df9ff";
-    c.lineCap = "round"; c.strokeStyle = eye; c.fillStyle = eye; c.lineWidth = 4;
+    const x = 180, y = 123 + Math.sin(t * 2.2) * 2, mood = game.mood, look = game.look * 5;
+    c.strokeStyle = "#b5bdf0"; c.lineWidth = 3; c.lineCap = "round"; c.beginPath(); c.moveTo(x, y - 30); c.quadraticCurveTo(x + 6, y - 38, x, y - 44); c.stroke();
+    const bulb = mood === "sad" ? "#ff4d5e" : Math.sin(t * 5) > 0 ? "#ffd23f" : "#a77d10";
+    dot(x, y - 46, 14, rad(x, y - 46, 0, 14, [[0, bulb], [1, "rgba(0,0,0,0)"]])); dot(x, y - 46, 5, bulb);
+    for (const s of [-1, 1]) { rr(x + s * 58 - 7, y - 10, 14, 22, 6); c.fillStyle = lin(0, y - 10, 0, y + 12, [[0, "#b9c1ee"], [1, "#7d86c2"]]); c.fill(); }
+    rr(x - 54, y - 32, 108, 66, 26); c.fillStyle = lin(0, y - 32, 0, y + 34, [[0, "#f3f5ff"], [1, "#a3acdf"]]); c.fill();
+    rr(x - 50, y - 30, 100, 18, 12); c.fillStyle = "rgba(255,255,255,0.35)"; c.fill();
+    rr(x - 44, y - 23, 88, 46, 18); c.fillStyle = lin(0, y - 23, 0, y + 23, [[0, "#1d2350"], [1, "#0f1330"]]); c.fill();
+    const eye = mood === "sad" ? "#ff8a94" : "#7df9ff";
+    c.strokeStyle = eye; c.fillStyle = eye; c.lineWidth = 4; c.shadowColor = eye; c.shadowBlur = 8;
     for (const s of [-1, 1]) {
-      const ex = x + s * 18, ey = y - 4;
-      if (mood === "happy") { c.beginPath(); c.arc(ex, ey + 4, 7, Math.PI * 1.1, Math.PI * 1.9); c.stroke(); }
-      else if (mood === "sad") { c.beginPath(); c.moveTo(ex - 7, ey - 2 * s); c.lineTo(ex + 7, ey + 2 * s); c.stroke(); }
+      const ex = x + s * 18 + look, ey = y - 4;
+      if (mood === "sad") { c.beginPath(); c.moveTo(ex - 7, ey - 2 * s); c.lineTo(ex + 7, ey + 2 * s); c.stroke(); }
       else { const h = (t % 3.3) < 0.13 ? 2 : 10; rr(ex - 5, ey - h / 2, 10, h, 4); c.fill(); }
     }
     c.beginPath();
-    if (mood === "happy") c.arc(x, y + 6, 8, 0.15 * Math.PI, 0.85 * Math.PI); else if (mood === "sad") c.arc(x, y + 16, 7, 1.2 * Math.PI, 1.8 * Math.PI); else { c.moveTo(x - 6, y + 11); c.lineTo(x + 6, y + 11); }
-    c.stroke();
+    if (mood === "sad") c.arc(x, y + 16, 7, 1.2 * Math.PI, 1.8 * Math.PI); else { c.moveTo(x - 6 + look, y + 11); c.lineTo(x + 6 + look, y + 11); }
+    c.stroke(); c.shadowBlur = 0;
   }
   function drawCard() {
     const x = 18, y = 162, w = 324, h = 290, inst = game.inst;
+    const e = 1 - Math.pow(1 - game.enter, 3);
     c.save();
-    if (game.pulse > 0) { const k = 1 + Math.sin(game.pulse * Math.PI) * 0.03; c.translate(180, y + h / 2); c.scale(k, k); c.translate(-180, -(y + h / 2)); }
-    rr(x - 2, y + 6, w + 4, h, 28); c.fillStyle = "rgba(0,0,0,0.35)"; c.fill();
-    rr(x, y, w, h, 26); c.fillStyle = lin(0, y, 0, y + h, [[0, "rgba(64,72,150,0.92)"], [1, "rgba(28,30,78,0.95)"]]); c.fill();
-    c.lineWidth = 2; c.strokeStyle = "rgba(170,180,255,0.35)"; c.stroke();
-    rr(x + 10, y + 8, w - 20, 40, 18); c.fillStyle = "rgba(255,255,255,0.05)"; c.fill();
-    if (inst && game.phase !== "menu") drawPrompt(inst, x, y, w, h);
-    if (game.phase === "feedback") drawVerdict(x, y, w, h);
+    c.globalAlpha = 0.3 + 0.7 * e;
+    c.translate(180, y + h / 2); const k = (0.94 + 0.06 * e) * (1 + Math.sin(game.pulse * Math.PI) * 0.03); c.scale(k, k); c.translate(-180, -(y + h / 2) - (1 - e) * 16);
+    rr(x - 2, y + 8, w + 4, h, 28); c.fillStyle = "rgba(0,0,0,0.4)"; c.fill();
+    rr(x, y, w, h, 26); c.fillStyle = lin(0, y, 0, y + h, [[0, "rgba(70,78,160,0.94)"], [1, "rgba(26,28,74,0.97)"]]); c.fill();
+    // A glowing border in the time colour; it beats in the last second.
+    const frac = game.phase === "play" && inst ? Math.max(0, game.s.left / inst.total) : 1;
+    const col = game.phase === "over" ? "#ff4d5e" : game.phase === "play" ? timeColor(frac) : "#7d8bff";
+    const beat = game.phase === "play" && game.s.left < 1 ? 0.5 + 0.5 * Math.sin(t * 14) : 0.5;
+    c.lineWidth = 2.5; c.strokeStyle = col; c.globalAlpha = (0.3 + 0.7 * e) * (0.45 + 0.4 * beat); c.shadowColor = col; c.shadowBlur = 18; rr(x, y, w, h, 26); c.stroke(); c.shadowBlur = 0; c.globalAlpha = 0.3 + 0.7 * e;
+    rr(x + 12, y + 10, w - 24, 34, 17); c.fillStyle = lin(0, y + 10, 0, y + 44, [[0, "rgba(255,255,255,0.12)"], [1, "rgba(255,255,255,0)"]]); c.fill();
+    if (inst && game.phase === "play") drawPrompt(inst, x, y, w, h);
     c.restore();
     if (game.pulse > 0) { const r = 160 + (1 - game.pulse) * 120; c.beginPath(); c.ellipse(180, y + h / 2, r, r * 0.9, 0, 0, TAU); c.lineWidth = 6 * game.pulse; c.strokeStyle = `rgba(255,210,63,${game.pulse})`; c.stroke();
-      c.font = "700 26px Fredoka, sans-serif"; c.textAlign = "center"; c.fillStyle = `rgba(255,210,63,${Math.min(1, game.pulse * 2)})`; c.fillText(`${game.streak} in a row!`, 180, y - 8); }
+      c.font = "700 26px Fredoka, sans-serif"; c.textAlign = "center"; c.fillStyle = `rgba(255,210,63,${Math.min(1, game.pulse * 2)})`; c.fillText(`${game.score} rounds!`, 180, y - 8); }
   }
   function drawPrompt(inst, x, y, w, h) {
     const lines = inst.lines, size = lines.length > 2 ? 28 : 32;
-    let top = y + (inst.shapes || inst.polygon || inst.inkWord || inst.hold ? 64 : lines.length > 2 ? 104 : 124);
+    let top = y + (inst.shapes || inst.polygon || inst.inkWord || inst.hold ? 70 : lines.length > 2 ? 108 : 128);
     c.textBaseline = "alphabetic"; c.textAlign = "left";
     for (const line of lines) {
       c.font = `700 ${size}px Fredoka, sans-serif`;
@@ -375,59 +393,58 @@
       c.shadowBlur = 0; top += size + 10;
     }
     const midY = top + 50;
-    if (inst.shapes) { const n = inst.shapes.length, gap = Math.min(42, (w - 50) / n); inst.shapes.forEach(([k, tone], i) => shape(k, 180 - (n - 1) * gap / 2 + i * gap, midY - 6 + (i % 2) * 14, 15, COLORS[tone].face)); }
-    if (inst.polygon) { c.beginPath(); for (let i = 0; i < inst.polygon; i++) { const a = -Math.PI / 2 + i * TAU / inst.polygon + (inst.polygon === 4 ? Math.PI / 4 : 0); c.lineTo(180 + Math.cos(a) * 44, midY + Math.sin(a) * 44); } c.closePath(); c.fillStyle = lin(0, midY - 44, 0, midY + 44, [[0, "#ffffff"], [1, "#b9c2ff"]]); c.shadowColor = "#9db4ff"; c.shadowBlur = 18; c.fill(); c.shadowBlur = 0; }
+    if (inst.shapes) { const n = inst.shapes.length, gap = Math.min(42, (w - 50) / n); inst.shapes.forEach(([k, tone], i) => shape(k, 180 - (n - 1) * gap / 2 + i * gap, midY - 6 + (i % 2) * 14 + Math.sin(t * 2 + i) * 2, 15, COLORS[tone].face)); }
+    if (inst.polygon) { c.save(); c.translate(180, midY); c.rotate(Math.sin(t * 0.8) * 0.08); c.beginPath(); for (let i = 0; i < inst.polygon; i++) { const a = -Math.PI / 2 + i * TAU / inst.polygon + (inst.polygon === 4 ? Math.PI / 4 : 0); c.lineTo(Math.cos(a) * 46, Math.sin(a) * 46); } c.closePath(); c.fillStyle = lin(0, -46, 0, 46, [[0, "#ffffff"], [1, "#aeb8ff"]]); c.shadowColor = "#9db4ff"; c.shadowBlur = 20; c.fill(); c.shadowBlur = 0; c.restore(); }
     if (inst.inkWord) { const [word, ink] = inst.inkWord; c.font = "700 60px Fredoka, sans-serif"; c.textAlign = "center"; c.fillStyle = COLORS[ink].face; c.shadowColor = COLORS[ink].face; c.shadowBlur = 18; c.fillText(word, 180, midY + 22); c.shadowBlur = 0; }
-    if (inst.hold && game.phase === "play") { const [k, dur] = inst.hold, s = game.s, f = s.down[k] ? Math.min(1, (s.elapsed - s.downAt[k]) / dur) : 0; rr(60, midY - 12, 240, 26, 13); c.fillStyle = "rgba(255,255,255,0.1)"; c.fill(); if (f > 0) { rr(60, midY - 12, Math.max(26, 240 * f), 26, 13); c.fillStyle = COLORS[k].face; c.shadowColor = COLORS[k].face; c.shadowBlur = 14; c.fill(); c.shadowBlur = 0; } }
-    if (inst.counter && game.phase === "play") { const n = game.s.count[inst.counter]; for (let i = 0; i < n; i++) dot(180 - (n - 1) * 9 + i * 18, y + h - 58, 5, COLORS[inst.counter].face); }
+    if (inst.hold) { const [k, dur] = inst.hold, s = game.s, f = s.down[k] ? Math.min(1, (s.elapsed - s.downAt[k]) / dur) : 0; rr(60, midY - 12, 240, 26, 13); c.fillStyle = "rgba(255,255,255,0.1)"; c.fill(); if (f > 0) { rr(60, midY - 12, Math.max(26, 240 * f), 26, 13); c.fillStyle = COLORS[k].face; c.shadowColor = COLORS[k].face; c.shadowBlur = 14; c.fill(); c.shadowBlur = 0; } }
     if (inst.small) { c.font = "600 16px Fredoka, sans-serif"; c.textAlign = "center"; c.fillStyle = "#aab4ef"; c.fillText(inst.small, 180, y + h - 28); }
-    if (inst.star) star(x + w - 36, y + 38, 22);
-  }
-  function drawVerdict(x, y, w, h) {
-    rr(x + 8, y + 8, w - 16, h - 16, 22); c.fillStyle = game.verdict ? "rgba(14,40,32,0.9)" : "rgba(48,12,22,0.92)"; c.fill();
-    c.textAlign = "center";
-    if (game.verdict) {
-      c.font = "700 44px Fredoka, sans-serif"; c.fillStyle = "#3ddc84"; c.shadowColor = "#3ddc84"; c.shadowBlur = 16; c.fillText("Nice!", 180, y + h / 2 + 4); c.shadowBlur = 0;
-      c.font = "600 18px Fredoka, sans-serif"; c.fillStyle = "#bff5d6"; c.fillText(`+1 · streak ${game.streak}`, 180, y + h / 2 + 38);
-    } else {
-      c.font = "700 40px Fredoka, sans-serif"; c.fillStyle = "#ff6b7a"; c.shadowColor = "#ff4d5e"; c.shadowBlur = 16; c.fillText("Oops!", 180, y + h / 2 - 20); c.shadowBlur = 0;
-      c.font = "600 19px Fredoka, sans-serif"; c.fillStyle = "#ffe3e6";
-      const rows = [""]; for (const wd of game.why.split(" ")) { const tryRow = rows[rows.length - 1] ? rows[rows.length - 1] + " " + wd : wd; if (c.measureText(tryRow).width > w - 60) rows.push(wd); else rows[rows.length - 1] = tryRow; }
-      rows.forEach((row, i) => c.fillText(row, 180, y + h / 2 + 20 + i * 26));
-    }
+    if (inst.star) star(x + w - 36, y + 38 + Math.sin(t * 3) * 2, 22);
   }
   function drawButtons() {
-    rr(16, 470, 328, 156, 34); c.fillStyle = lin(0, 470, 0, 626, [[0, "rgba(58,64,128,0.9)"], [1, "rgba(30,32,76,0.95)"]]); c.fill();
-    c.lineWidth = 2; c.strokeStyle = "rgba(170,180,255,0.2)"; c.stroke();
+    rr(16, 472, 328, 154, 34); c.fillStyle = lin(0, 472, 0, 626, [[0, "rgba(62,68,136,0.92)"], [1, "rgba(26,28,70,0.96)"]]); c.fill();
+    c.lineWidth = 2; c.strokeStyle = "rgba(170,180,255,0.22)"; c.stroke();
+    rr(28, 478, 304, 10, 5); c.fillStyle = "rgba(255,255,255,0.07)"; c.fill();
+    for (const r of game.ripples) { const col = COLORS[r.key]; c.beginPath(); c.ellipse(r.x, r.y + 14, BTN_R + 16 + (1 - r.life) * 46, 30 + (1 - r.life) * 22, 0, 0, TAU); c.lineWidth = 4 * r.life; c.strokeStyle = col.glow + (r.life * 0.8) + ")"; c.stroke(); }
     for (const key of KEYS) {
       const col = COLORS[key], x = game.slotX[key], y = BTN_Y, down = game.pressed[key];
       const depth = down ? 4 : 14;
-      if (down) { c.fillStyle = rad(x, y, 10, BTN_R + 40, [[0, col.glow + "0.55)"], [1, col.glow + "0)"]]); c.fillRect(x - BTN_R - 40, y - BTN_R - 40, (BTN_R + 40) * 2, (BTN_R + 40) * 2); }
-      c.beginPath(); c.ellipse(x, y + 22, BTN_R + 14, 30, 0, 0, TAU); c.fillStyle = "#0d0f24"; c.fill();
-      c.beginPath(); c.ellipse(x, y + 16, BTN_R + 14, 30, 0, 0, TAU); c.fillStyle = lin(0, y - 14, 0, y + 46, [[0, "#c6ccef"], [1, "#5e6596"]]); c.fill();
-      c.beginPath(); c.ellipse(x, y + 16, BTN_R + 4, 24, 0, 0, TAU); c.fillStyle = "#1a1d3a"; c.fill();
+      c.fillStyle = rad(x, y + 16, 10, BTN_R + 46, [[0, col.glow + (down ? "0.6)" : "0.16)")], [1, col.glow + "0)"]]); c.fillRect(x - BTN_R - 46, y - BTN_R - 30, (BTN_R + 46) * 2, (BTN_R + 46) * 2);
+      c.beginPath(); c.ellipse(x, y + 22, BTN_R + 14, 30, 0, 0, TAU); c.fillStyle = "#0b0d20"; c.fill();
+      c.beginPath(); c.ellipse(x, y + 16, BTN_R + 14, 30, 0, 0, TAU); c.fillStyle = lin(0, y - 14, 0, y + 46, [[0, "#d3d8f6"], [1, "#565d90"]]); c.fill();
+      c.beginPath(); c.ellipse(x, y + 16, BTN_R + 6, 25, 0, 0, TAU); c.lineWidth = 2; c.strokeStyle = col.glow + (down ? "0.95)" : "0.45)"); c.stroke();
+      c.beginPath(); c.ellipse(x, y + 16, BTN_R + 4, 24, 0, 0, TAU); c.fillStyle = "#171a36"; c.fill();
       const top = y + 14 - depth;
-      c.beginPath(); c.ellipse(x, y + 16, BTN_R, 24, 0, 0, Math.PI); c.lineTo(x - BTN_R, top); c.ellipse(x, top, BTN_R, 24, 0, Math.PI, TAU); c.closePath(); c.fillStyle = col.side; c.fill();
+      c.beginPath(); c.ellipse(x, y + 16, BTN_R, 24, 0, 0, Math.PI); c.lineTo(x - BTN_R, top); c.ellipse(x, top, BTN_R, 24, 0, Math.PI, TAU); c.closePath(); c.fillStyle = lin(x - BTN_R, 0, x + BTN_R, 0, [[0, col.side], [0.45, col.low], [1, col.side]]); c.fill();
       const g = c.createRadialGradient(x - 18, top - 12, 4, x, top, BTN_R + 10); g.addColorStop(0, "#ffffff"); g.addColorStop(0.16, col.face); g.addColorStop(1, col.low);
       c.beginPath(); c.ellipse(x, top, BTN_R, 26, 0, 0, TAU); c.fillStyle = g; c.fill();
-      c.beginPath(); c.ellipse(x - 16, top - 9, 20, 7, -0.25, 0, TAU); c.fillStyle = "rgba(255,255,255,0.45)"; c.fill();
-      c.font = "700 16px Fredoka, sans-serif"; c.textAlign = "center"; c.fillStyle = col.text; c.fillText(col.name, x, 612);
+      c.beginPath(); c.ellipse(x - 16, top - 9, 20, 7, -0.25, 0, TAU); c.fillStyle = "rgba(255,255,255,0.5)"; c.fill();
+      c.beginPath(); c.ellipse(x + 22, top + 8, 10, 4, -0.25, 0, TAU); c.fillStyle = "rgba(255,255,255,0.15)"; c.fill();
+      rr(x - 36, 600, 72, 20, 10); c.fillStyle = "rgba(0,0,0,0.3)"; c.fill();
+      c.font = "700 14px Fredoka, sans-serif"; c.textAlign = "center"; c.fillStyle = col.text; c.fillText(col.name, x, 615);
     }
   }
   function drawParticles() { for (const p of game.parts) { c.save(); c.translate(p.x, p.y); c.rotate(p.spin + t * 6); c.globalAlpha = Math.min(1, p.life * 2); c.fillStyle = p.color; c.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2); c.restore(); } c.globalAlpha = 1; }
-  function overlay(title, lines, sub) {
-    c.fillStyle = "rgba(8,8,24,0.78)"; c.fillRect(0, 0, W, 470);
-    c.textAlign = "center"; c.font = "700 40px Fredoka, sans-serif"; c.fillStyle = "#ffffff"; c.shadowColor = "#7d8bff"; c.shadowBlur = 20; c.fillText(title, 180, 230); c.shadowBlur = 0;
-    c.font = "600 19px Fredoka, sans-serif"; c.fillStyle = "#cfd5ff"; lines.forEach((l, i) => c.fillText(l, 180, 276 + i * 30));
-    c.font = "700 18px Fredoka, sans-serif"; c.fillStyle = `rgba(255,210,63,${0.6 + Math.sin(t * 4) * 0.4})`; c.fillText(sub, 180, 276 + lines.length * 30 + 30);
+  function panel(title, titleColor, lines, sub) {
+    c.fillStyle = "rgba(6,6,20,0.72)"; c.fillRect(-20, -20, W + 40, 492);
+    rr(30, 170, 300, 280, 28); c.fillStyle = lin(0, 170, 0, 450, [[0, "rgba(58,48,130,0.97)"], [1, "rgba(22,20,60,0.98)"]]); c.fill();
+    c.lineWidth = 2; c.strokeStyle = "rgba(190,180,255,0.35)"; c.stroke();
+    c.textAlign = "center"; c.font = "700 38px Fredoka, sans-serif";
+    c.fillStyle = titleColor; c.shadowColor = titleColor; c.shadowBlur = 20; c.fillText(title, 180, 226); c.shadowBlur = 0;
+    let y = 266;
+    for (const [text, font, color] of lines) {
+      c.font = font; c.fillStyle = color;
+      const rows = [""]; for (const wd of text.split(" ")) { const tryRow = rows[rows.length - 1] ? rows[rows.length - 1] + " " + wd : wd; if (c.measureText(tryRow).width > 260) rows.push(wd); else rows[rows.length - 1] = tryRow; }
+      for (const row of rows) { c.fillText(row, 180, y); y += parseInt(font.split(" ")[1], 10) + 8; }
+    }
+    if (sub) { c.font = "700 17px Fredoka, sans-serif"; c.fillStyle = `rgba(255,210,63,${0.6 + Math.sin(t * 4) * 0.4})`; c.fillText(sub, 180, 430); }
   }
   function draw() {
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
-    if (game.shake > 0) c.translate((Math.random() - 0.5) * 14 * game.shake, (Math.random() - 0.5) * 10 * game.shake);
+    if (game.shake > 0) c.translate((Math.random() - 0.5) * 16 * game.shake, (Math.random() - 0.5) * 12 * game.shake);
     drawBackground(); drawHud(); drawTimer(); drawBot(); drawCard(); drawButtons(); drawParticles();
-    if (game.flash > 0) { c.fillStyle = game.flashColor + (game.flash * 0.25) + ")"; c.fillRect(-20, -20, W + 40, H + 40); }
-    if (game.phase === "menu") overlay("BUTTON BOT", ["Two buttons. Do exactly what", "the robot says. Three lives.", `Best: ${best}`], "press a button to start");
-    if (game.phase === "over") overlay("Game over", [`Score ${game.score} · ${game.round} rounds`, game.record ? "New best!" : `Best: ${best}`], game.overWait > 0 ? "" : "press a button to play again");
+    if (game.flash > 0) { c.fillStyle = `rgba(255,60,80,${game.flash * 0.3})`; c.fillRect(-20, -20, W + 40, H + 40); }
+    if (game.phase === "menu") panel("BUTTON BOT", "#ffffff", [["Do exactly what the robot says.", "600 18px Fredoka, sans-serif", "#cfd5ff"], ["Every round lasts to the end of the bar.", "600 18px Fredoka, sans-serif", "#cfd5ff"], ["One mistake ends the game.", "700 18px Fredoka, sans-serif", "#ff8a94"], [`Best: ${best}`, "700 20px Fredoka, sans-serif", "#ffd23f"]], "press a button to start");
+    if (game.phase === "over") panel("Game over", "#ff6b7a", [[game.why, "600 18px Fredoka, sans-serif", "#ffe3e6"], [`${game.score}`, "700 52px Fredoka, sans-serif", "#ffffff"], [game.record ? "rounds · new best!" : `rounds · best ${best}`, "600 17px Fredoka, sans-serif", game.record ? "#ffd23f" : "#cfd5ff"]], game.overWait > 0 ? "" : "press a button to play again");
   }
   function frame(now) { const dt = Math.min(0.05, (now - last) / 1000); last = now; t += dt; step(dt); draw(); requestAnimationFrame(frame); }
 
