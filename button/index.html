@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="robots" content="noindex, nofollow">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Button Bot draft 5</title>
+<title>Button Bot draft 6</title>
 <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
   :root { --bg: #0e1024; --text: #f4f1ec; --muted: #9ba3be; }
@@ -24,12 +24,12 @@
 <body>
 <main>
   <div class="intro">
-    <h1>Button Bot · taslak 5</h1>
+    <h1>Button Bot · taslak 6</h1>
     <ul>
-      <li>İki tuş: <b>KIRMIZI</b> ve <b>MAVİ</b>. Klavyede sol tuş <b>A</b> ya da ←, sağ tuş <b>D</b> ya da →. Telefonda iki tuşa aynı anda basılabilir.</li>
+      <li>İki tuş: <b>KIRMIZI</b> ve <b>MAVİ</b>. Klavyede sol tuş <b>A</b> ya da ←, sağ tuş <b>D</b> ya da →. Her kartta tek tuşa basılır; iki tuşa aynı anda basmak gerekmez.</li>
       <li><b>TAP</b> = kısa dokun, <b>HOLD</b> = basılı tut (tuşun etrafındaki halka dolunca basılı tutma sayılır). Kart hangisini diyorsa o; yanlış türde basmak da hatadır.</li>
       <li>Her tur süre bitene kadar sürer; doğru yaptın mı söylenmez. Görevi bitirdikten sonra bir daha basarsan o da yanlış sayılır.</li>
-      <li><b>Tek yanlışta oyun biter</b> ve nedeni yazılır. Tur 1–5 temel, 6–15 tuzaklar, 16 ve sonrası hafıza, tuş değişimi, bas-tut-dokun, son saniye, ⭐ kuralı.</li>
+      <li><b>Tek yanlışta oyun biter</b> ve nedeni yazılır. Tur 1–5 temel, 6–15 tuzaklar, 16 ve sonrası hafıza, tuş değişimi, son saniye, ⭐ kuralı.</li>
     </ul>
   </div>
   <div class="phone"><canvas id="board" width="360" height="640"></canvas></div>
@@ -90,11 +90,6 @@
     { id: "nothing", tier: 1, make: () => ({
       lines: pick([[[T("Do NOT press")], [T("anything")]], [[T("Hands off!")]], [[T("Don't touch")], [T("the buttons")]]]),
       none: true, time: -1, onPress: () => fail("You pressed a button"), onTimeout: () => "PASS" }) },
-    { id: "both", tier: 1, make: (ctx) => { const kind = mode(ctx); return {
-      lines: [[T(`${verb(kind)} BOTH`)], [T("buttons together")]], wants: kind,
-      onPress: (k, s) => (s.count[other(k)] ? (Math.abs(s.downAt.R - s.downAt.B) < 0.25 ? "PASS" : fail("The buttons were not together")) : "CONTINUE"),
-      onTick: (s) => { for (const k of KEYS) if (s.raw[k] && !s.raw[other(k)] && s.elapsed - s.downAt[k] > 0.25) return fail(`Only ${N(k)} was pressed`); return "CONTINUE"; },
-      onTimeout: () => fail(`Time ran out: ${verb(kind).toLowerCase()} both`) }; } },
     { id: "exact", tier: 1, make: () => { const c = pick(KEYS), n = between(2, 4); return Object.assign(exactly(c, n), { lines: [[T("Tap "), C(c)], [T(`exactly ${n} times`)]], time: 0.5 }); } },
     { id: "position", tier: 1, make: (ctx) => { const i = between(0, 1), word = ["LEFT", "RIGHT"][i], c = ctx.slots[i], kind = mode(ctx); return { lines: [[T(`${verb(kind)} the`)], [T(`${word} button`)]], wants: kind,
       onPress: (k) => (k === c ? "PASS" : fail(`That was the ${i ? "LEFT" : "RIGHT"} button`)), onTimeout: () => fail(`Time ran out: ${verb(kind).toLowerCase()} the ${word} button`) }; } },
@@ -133,11 +128,6 @@
     { id: "opposite", tier: 3, ok: (ctx) => ctx.last && ctx.last.single, make: (ctx) => { const c = other(ctx.last.single), kind = mode(ctx); return pressColor(c, kind, { lines: [[T(`${verb(kind)} the OTHER`)], [T("button from last round")]] }); } },
     { id: "swap", tier: 3, make: (ctx) => { swapSlots(); ctx.slots = game.slots; if (rand() < 0.5) { const inst = RULES.find((r) => r.id === "position").make(ctx); inst.small = "the buttons swapped!"; inst.time = 0.8; return inst; }
       const c = pick(KEYS), kind = mode(ctx); return pressColor(c, kind, { lines: [[T(verb(kind) + " "), C(c)]], small: "the buttons swapped!", time: 0.8 }); } },
-    { id: "holdTap", tier: 3, make: () => { const c = pick(KEYS), o = other(c); return { lines: [[T("Hold "), C(c), T(" and")], [T("tap "), C(o), T(" twice")]], wants: "any", time: 1.2,
-      onPress: (k, s, kind) => { if (k === c) return kind !== "hold" ? fail(`Tapped ${N(c)}: it said HOLD`) : s.count[o] >= 2 ? "PASS" : "CONTINUE";
-        if (kind === "hold") return fail(`Held ${N(o)}: it said TAP`); if (!s.raw[c]) return fail(`Tapped ${N(o)} without holding ${N(c)}`); return s.count[o] >= 2 && s.count[c] > 0 ? "PASS" : "CONTINUE"; },
-      onRelease: (k, s) => (k === c && s.count[o] < 2 ? fail(`Let go of ${N(c)} too early`) : "CONTINUE"),
-      onTimeout: () => fail("Time ran out") }; } },
     { id: "lastSecond", tier: 3, make: () => { const c = pick(KEYS); return { lines: [[T("Tap "), C(c), T(" only in")], [T("the last second")]], small: "wait for the red zone", zone: 1, wants: "tap", time: 0.6,
       onPress: (k, s) => { const left = s.total - s.downAt[k]; if (left > 1.0) return fail(`Too early: ${left.toFixed(1)} s were left`); return k === c ? "PASS" : fail(`Tapped ${N(k)} instead of ${N(c)}`); },
       onTimeout: () => fail("Too late") }; } },
