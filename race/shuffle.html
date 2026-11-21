@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex, nofollow">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Comet Shuffle draft</title>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #14172b; --text: #f4f1ec; --muted: #9ba3be; --accent: #ffb23e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 900px; margin: 0 auto; padding: 24px 16px 48px; }
+  .intro { max-width: 560px; margin: 0 auto 20px; }
+  .intro h1 { margin: 0 0 6px; font-size: 24px; }
+  .intro p, .intro li { color: var(--muted); margin: 0 0 6px; }
+  .intro ul { padding-left: 18px; margin: 6px 0 0; }
+  .phone { width: 360px; max-width: 100%; margin: 0 auto; border-radius: 30px; overflow: hidden; box-shadow: 0 0 0 8px #000; touch-action: manipulation; user-select: none; }
+  canvas { display: block; width: 100%; height: auto; cursor: pointer; }
+  .row { display: flex; gap: 10px; justify-content: center; margin-top: 14px; flex-wrap: wrap; }
+  button { font: 600 16px Fredoka, sans-serif; border: 0; border-radius: 14px; padding: 8px 16px; background: #2b3157; color: var(--text); cursor: pointer; }
+  button.on { background: var(--accent); color: #2a1a00; }
+</style>
+</head>
+<body>
+<main>
+  <div class="intro">
+    <h1>Comet Shuffle · taslak</h1>
+    <ul>
+      <li>Bir kuyruklu yıldız işaretlenir: onu takip et.</li>
+      <li>Hepsi bulutsuya girer, aynı griye bürünür ve şerit değiştirerek karışır.</li>
+      <li>Bulutsudan çıkınca: o hangisi? Şeridine dokun.</li>
+      <li>60 saniye; art arda doğrular puanı katlar. Aşağıdan zorluğu dene.</li>
+    </ul>
+  </div>
+  <div class="phone"><canvas id="board" width="360" height="640"></canvas></div>
+  <div class="row"><button id="easy" class="on">Kolay</button><button id="mid">Orta</button><button id="hard">Zor</button><button id="two">İki hedef</button></div>
+</main>
+<script>
+(() => {
+  const W = 360, H = 640, TAU = Math.PI * 2, ROUND = 60;
+  const LANE_TOP = 218, LANE_AREA = 400;
+  const COLORS = ["#ff4d5e", "#3b8bff", "#ffc21a", "#22c55e", "#a066ff"];
+  const SHAPES = ["star", "heart", "diamond", "circle", "triangle"];
+  const NAMES = ["STAR", "HEART", "DIAMOND", "CIRCLE", "TRIANGLE"];
+  const MODES = {
+    easy: { count: 4, swaps: 3, swapTime: 0.75, together: 1, targets: 1 },
+    mid: { count: 4, swaps: 5, swapTime: 0.6, together: 1, targets: 1 },
+    hard: { count: 5, swaps: 7, swapTime: 0.5, together: 2, targets: 1 },
+    two: { count: 5, swaps: 5, swapTime: 0.6, together: 1, targets: 2 },
+  };
+
+  function dot(c, x, y, r, f) { c.beginPath(); c.arc(x, y, r, 0, TAU); c.fillStyle = f; c.fill(); }
+  function rr(c, x, y, w, h, r) { c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); }
+  function shape(c, kind, x, y, r, fill, line) {
+    c.beginPath();
+    if (kind === "star") { for (let i = 0; i < 10; i++) { const rad = i % 2 ? r * 0.45 : r, a = -Math.PI / 2 + i * Math.PI / 5; c.lineTo(x + Math.cos(a) * rad, y + Math.sin(a) * rad); } }
+    else if (kind === "heart") { for (let i = 0; i < 40; i++) { const t = i * TAU / 40; c.lineTo(x + 16 * Math.pow(Math.sin(t), 3) * r / 17, y - (13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t)) * r / 17 + r * 0.1); } }
+    else if (kind === "diamond") { c.moveTo(x, y - r); c.lineTo(x + r * 0.75, y); c.lineTo(x, y + r); c.lineTo(x - r * 0.75, y); }
+    else if (kind === "circle") { c.arc(x, y, r * 0.85, 0, TAU); }
+    else { for (let i = 0; i < 3; i++) { const a = -Math.PI / 2 + i * TAU / 3; c.lineTo(x + Math.cos(a) * r, y + r * 0.15 + Math.sin(a) * r); } }
+    c.closePath(); c.fillStyle = fill; c.fill();
+    if (line) { c.lineWidth = 3; c.strokeStyle = line; c.stroke(); }
+  }
+  function mix(a, b, k) {
+    const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
+    const ch = (s) => Math.round(((pa >> s) & 255) * (1 - k) + ((pb >> s) & 255) * k);
+    return `rgb(${ch(16)},${ch(8)},${ch(0)})`;
+  }
+
+  const canvas = document.getElementById("board");
+  const c = canvas.getContext("2d");
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  const sky = Array.from({ length: 70 }, (_, i) => ({ x: (i * 97) % W, y: (i * 61) % H, r: 0.6 + (i % 3) * 0.5, v: 0.4 + (i % 4) * 0.3 }));
+  let mode = MODES.easy;
+  // Phases of a round: show (the target glows), enter (into the nebula), shuffle,
+  // ask (tap a lane), reveal.
+  let comets, phase, phaseT, swaps, swapsLeft, targets, picks, result, time, score, streak, right, wrong, started, over, t = 0, last = performance.now();
+
+  const laneH = () => LANE_AREA / mode.count;
+  const laneY = (lane) => LANE_TOP + lane * laneH() + laneH() / 2;
+  const mult = () => Math.min(1 + Math.floor(streak / 3), 5);
+
+  function reset() {
+    time = ROUND; score = 0; streak = 0; right = 0; wrong = 0; started = false; over = false;
+    newRound();
+    phase = "idle";
+  }
+  function newRound() {
+    comets = Array.from({ length: mode.count }, (_, i) => ({ id: i, lane: i, from: i, to: i, x: 250 - (i % 2) * 40 }));
+    const ids = comets.map((k) => k.id).sort(() => Math.random() - 0.5);
+    targets = ids.slice(0, mode.targets);
+    picks = []; result = null; swaps = []; swapsLeft = mode.swaps;
+    phase = "show"; phaseT = 0;
+  }
+  const laneOf = (id) => comets[id].lane;
+  const fog = () => phase === "enter" ? Math.min(1, phaseT / 0.6) : phase === "shuffle" || phase === "ask" ? 1 : phase === "reveal" ? Math.max(0, 1 - phaseT / 0.4) : 0;
+
+  function startSwaps() {
+    // `together` swaps at once, between distinct lanes.
+    const free = comets.map((k) => k.lane).sort(() => Math.random() - 0.5);
+    swaps = [];
+    for (let k = 0; k < mode.together && free.length >= 2; k++) {
+      const a = free.pop(), b = free.pop();
+      const ca = comets.find((x) => x.lane === a), cb = comets.find((x) => x.lane === b);
+      ca.from = a; ca.to = b; cb.from = b; cb.to = a;
+      swaps.push([ca, cb]);
+    }
+    swapsLeft -= swaps.length;
+  }
+
+  canvas.addEventListener("pointerdown", (ev) => {
+    if (over) { reset(); return; }
+    if (!started) { started = true; newRound(); return; }
+    if (phase !== "ask") return;
+    const r = canvas.getBoundingClientRect();
+    const y = (ev.clientY - r.top) * H / r.height;
+    const lane = Math.floor((y - LANE_TOP) / laneH());
+    if (lane < 0 || lane >= mode.count) return;
+    const target = targets[picks.length];
+    const ok = laneOf(target) === lane;
+    picks.push({ lane, ok });
+    if (!ok || picks.length === targets.length) {
+      const all = picks.every((p) => p.ok) && picks.length === targets.length;
+      if (all) { streak++; right++; score += 10 * mult() * targets.length; } else { streak = 0; wrong++; }
+      result = all; phase = "reveal"; phaseT = 0;
+    }
+  });
+
+  function step(dt) {
+    for (const k of comets) k.x += (250 - (k.id % 2) * 40 + Math.sin(t * 1.3 + k.id) * 14 - k.x) * dt;
+    if (!started || over) return;
+    time -= dt; if (time <= 0 && phase !== "reveal") { time = 0; over = true; return; }
+    phaseT += dt;
+    if (phase === "show" && phaseT > 1.8) { phase = "enter"; phaseT = 0; }
+    else if (phase === "enter" && phaseT > 0.7) { phase = "shuffle"; phaseT = 0; startSwaps(); }
+    else if (phase === "shuffle" && phaseT > mode.swapTime) {
+      for (const [a, b] of swaps) { a.lane = a.to; b.lane = b.to; a.from = a.lane; b.from = b.lane; }
+      if (swapsLeft > 0) { phaseT = 0; startSwaps(); } else { swaps = []; phase = "ask"; phaseT = 0; }
+    }
+    else if (phase === "reveal" && phaseT > 1.3) { if (time <= 0) over = true; else newRound(); }
+  }
+
+  function cometY(k) {
+    if (phase === "shuffle" && k.from !== k.to) {
+      const e = 0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, phaseT / mode.swapTime));
+      return laneY(k.from) + (laneY(k.to) - laneY(k.from)) * e;
+    }
+    return laneY(k.lane);
+  }
+
+  function drawComet(k, x, y, f) {
+    const color = mix(COLORS[k.id], "#b8bcd8", f);
+    const half = Math.min(20, laneH() * 0.3);
+    const g = c.createLinearGradient(x - 160, 0, x, 0);
+    g.addColorStop(0, "rgba(255,255,255,0)"); g.addColorStop(0.65, color.replace("rgb", "rgba").replace(")", ",0.55)")); g.addColorStop(1, "rgba(255,255,255,0.85)");
+    c.beginPath(); c.moveTo(x - 160, y); c.quadraticCurveTo(x - 60, y - half - 4, x, y - half); c.lineTo(x, y + half); c.quadraticCurveTo(x - 60, y + half + 4, x - 160, y); c.fillStyle = g; c.fill();
+    dot(c, x, y, half + 8, color.replace("rgb", "rgba").replace(")", ",0.3)"));
+    if (f < 0.55) shape(c, SHAPES[k.id], x, y, half + 2, color, "#ffffff");
+    else { dot(c, x, y, half, color); c.lineWidth = 3; c.strokeStyle = "#ffffff"; c.stroke(); }
+  }
+
+  function draw() {
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const bg = c.createLinearGradient(0, 0, 0, H); bg.addColorStop(0, "#0f1640"); bg.addColorStop(1, "#1c1250");
+    c.fillStyle = bg; c.fillRect(0, 0, W, H);
+    for (const s of sky) { const x = ((s.x - t * s.v * 40) % W + W) % W; dot(c, x, s.y, s.r, `rgba(255,255,255,${0.35 + 0.35 * Math.sin(t * 2 + s.x)})`); }
+    rr(c, 16, 16, 328, 40, 20); c.fillStyle = "rgba(255,255,255,0.1)"; c.fill();
+    c.fillStyle = "#fff4d6"; c.font = "700 18px Fredoka, sans-serif";
+    c.textAlign = "left"; c.fillText(`${Math.ceil(time)}s`, 32, 42);
+    c.textAlign = "center"; c.fillText(`×${mult()}`, 180, 42);
+    c.textAlign = "right"; c.fillText(score, 328, 42);
+    rr(c, 16, 70, 328, 128, 24); c.fillStyle = "rgba(255,255,255,0.1)"; c.fill();
+    c.textAlign = "center";
+    const names = targets.map((id) => NAMES[id]).join(" & ");
+    let big = "", sub = "", bigColor = "#fff4d6";
+    if (over) { big = "Race over!"; sub = `${right} right · ${wrong} wrong · tap to play again`; }
+    else if (!started) { big = "Tap to start"; sub = "follow the marked comet through the nebula"; }
+    else if (phase === "show") { big = `Follow the ${names}`; sub = "watch it closely"; bigColor = "#ffd23f"; }
+    else if (phase === "enter" || phase === "shuffle") { big = "Keep your eye on it..."; sub = ""; }
+    else if (phase === "ask") { big = targets.length > 1 ? `Where is the ${NAMES[targets[picks.length]]}?` : `Where is the ${names}?`; sub = "tap its lane"; bigColor = "#ffd23f"; }
+    else if (phase === "reveal") { big = result ? "Got it!" : "Lost it!"; sub = result ? `+${10 * Math.max(1, mult() - (result ? 0 : 0)) * targets.length}` : "the multiplier starts over"; bigColor = result ? "#3fd17f" : "#ff6b6b"; }
+    c.fillStyle = bigColor; c.font = big.length > 16 ? "700 26px Fredoka, sans-serif" : "700 32px Fredoka, sans-serif"; c.fillText(big, 180, 132);
+    c.font = "600 16px Fredoka, sans-serif"; c.fillStyle = "#b9c2e8"; c.fillText(sub, 180, 166);
+    for (let i = 0; i < mode.count; i++) if (i % 2 === 0) { c.fillStyle = "rgba(255,255,255,0.04)"; c.fillRect(0, LANE_TOP + i * laneH(), W, laneH()); }
+    const f = fog();
+    if (f > 0) {
+      // The nebula: soft purple clouds over the lanes.
+      for (let i = 0; i < 7; i++) {
+        const cx = 60 + i * 45 + Math.sin(t * 0.7 + i) * 10, cy = LANE_TOP + 40 + (i * 97) % (LANE_AREA - 60);
+        const g = c.createRadialGradient(cx, cy, 5, cx, cy, 120);
+        g.addColorStop(0, `rgba(160,102,255,${0.16 * f})`); g.addColorStop(1, "rgba(160,102,255,0)");
+        c.fillStyle = g; c.fillRect(cx - 120, cy - 120, 240, 240);
+      }
+    }
+    for (const k of comets) {
+      const isTarget = targets.includes(k.id);
+      if (phase === "show" && isTarget) {
+        const pulse = 1 + Math.sin(t * 8) * 0.12;
+        c.beginPath(); c.arc(k.x, laneY(k.lane), 30 * pulse, 0, TAU); c.strokeStyle = "#ffd23f"; c.lineWidth = 4; c.stroke();
+      }
+      drawComet(k, k.x, cometY(k), f);
+    }
+    if (phase === "reveal") {
+      for (const p of picks) { c.fillStyle = p.ok ? "rgba(63,209,127,0.28)" : "rgba(255,107,107,0.28)"; c.fillRect(0, LANE_TOP + p.lane * laneH(), W, laneH()); }
+      for (const id of targets) { c.beginPath(); c.arc(comets[id].x, laneY(laneOf(id)), 30, 0, TAU); c.strokeStyle = "#ffd23f"; c.lineWidth = 4; c.stroke(); }
+    }
+    if (phase === "ask") {
+      for (const p of picks) { c.fillStyle = "rgba(63,209,127,0.22)"; c.fillRect(0, LANE_TOP + p.lane * laneH(), W, laneH()); }
+    }
+  }
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000); last = now; t += dt;
+    step(dt); draw(); requestAnimationFrame(frame);
+  }
+  reset();
+  requestAnimationFrame(frame);
+  for (const id of Object.keys(MODES)) document.getElementById(id).onclick = () => {
+    mode = MODES[id];
+    for (const other of Object.keys(MODES)) document.getElementById(other).classList.toggle("on", other === id);
+    reset();
+  };
+})();
+</script>
+</body>
+</html>
