@@ -25,12 +25,13 @@
 <body>
 <main>
   <div class="intro">
-    <h1>Comet Cup · taslak 2 (sadeleştirildi)</h1>
+    <h1>Comet Cup · taslak 3</h1>
     <ul>
       <li>Sayılar ve yıldız toplama yok; sadece <b>sıra</b> ve <b>sollama</b>.</li>
       <li>Kuyruklu yıldızlar merdiven gibi aralıklı dizilir; sıra tek bakışta okunur.</li>
       <li>Sollama ara sıra olur ve açıkça görünür: biri hızlanıp öndekinin önüne geçer.</li>
-      <li>Talimatlar tek kelime: LEADER, 2ND, 3RD, LAST, ⬆ JUST PASSED, ⬇ DROPPED BACK.</li>
+      <li>Talimatlar tek kelime: LEADER, 2ND, 3RD, LAST, ⬆ MOVED UP, ⬇ MOVED DOWN.</li>
+      <li><b>Talimat ekrandayken yarış donar</b>: cevap verene kadar hiçbir sollama olmaz.</li>
     </ul>
   </div>
   <div class="phone"><canvas id="board" width="360" height="640"></canvas></div>
@@ -45,6 +46,8 @@
   const COLORS = ["#ff4d5e", "#3b8bff", "#ffc21a", "#22c55e", "#a066ff"];
   const SHAPES = ["star", "heart", "diamond", "circle", "triangle"];
   const SWAP_TIME = 0.9;
+  // Seconds the race settles after an overtake before an instruction may come.
+  const SETTLE = 0.45;
 
   function dot(c, x, y, r, f) { c.beginPath(); c.arc(x, y, r, 0, TAU); c.fillStyle = f; c.fill(); }
   function rr(c, x, y, w, h, r) { c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); }
@@ -100,9 +103,9 @@
     if (count >= 4) options.push({ label: "3RD", sub: "Tap the comet in 3rd place", answer: () => [order[2]] });
     if (lastSwap && t - lastSwap.t < 1.2) {
       const s = lastSwap;
-      options.push({ label: "⬆ JUST PASSED", sub: "Tap the comet that just overtook", answer: () => [s.up], arrow: true });
-      options.push({ label: "⬆ JUST PASSED", sub: "Tap the comet that just overtook", answer: () => [s.up], arrow: true });
-      options.push({ label: "⬇ DROPPED BACK", sub: "Tap the comet that was just passed", answer: () => [s.down], arrow: true });
+      options.push({ label: "⬆ MOVED UP", sub: "Tap the comet that just moved up a place", answer: () => [s.up], arrow: true });
+      options.push({ label: "⬆ MOVED UP", sub: "Tap the comet that just moved up a place", answer: () => [s.up], arrow: true });
+      options.push({ label: "⬇ MOVED DOWN", sub: "Tap the comet that just moved down a place", answer: () => [s.down], arrow: true });
       lastSwap = null;
     }
     const pick = options[Math.floor(Math.random() * options.length)];
@@ -135,9 +138,10 @@
         swap = null;
       }
     } else {
-      nextSwap -= dt;
-      // No overtake while an answer is due on a place, so the answer stays put.
-      if (nextSwap <= 0 && !(ask && !ask.arrow)) {
+      // The race freezes while an instruction is up, so nothing changes while
+      // the player decides.
+      if (!ask) nextSwap -= dt;
+      if (nextSwap <= 0 && !ask) {
         const at = Math.floor(Math.random() * (count - 1));
         swap = { at, up: order[at + 1], down: order[at], t: 0 };
         nextSwap = swapEvery[0] + Math.random() * (swapEvery[1] - swapEvery[0]);
@@ -146,7 +150,7 @@
     if (started && !over) {
       time -= dt; if (time <= 0) { time = 0; over = true; ask = null; }
       if (ask) { ask.left -= dt; if (ask.left <= 0) { streak = 0; wrong++; flash = { lane: -1, ok: false, life: 0.6 }; ask = null; pause = PAUSE; } }
-      else if (!over && !swap) { pause -= dt; if (pause <= 0) ask = newAsk(); }
+      else if (!over && !swap && !(lastSwap && t - lastSwap.t < SETTLE)) { pause -= dt; if (pause <= 0) ask = newAsk(); }
     }
     if (flash) { flash.life -= dt; if (flash.life <= 0) flash = null; }
   }
