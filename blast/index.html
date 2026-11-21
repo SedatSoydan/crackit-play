@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex, nofollow">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blast Quarry draft</title>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #14172b; --text: #f4f1ec; --muted: #9ba3be; --accent: #ffb23e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 900px; margin: 0 auto; padding: 24px 16px 48px; }
+  .intro { max-width: 580px; margin: 0 auto 20px; }
+  .intro h1 { margin: 0 0 6px; font-size: 24px; }
+  .intro p, .intro li { color: var(--muted); margin: 0 0 6px; }
+  .intro ul { padding-left: 18px; margin: 6px 0 0; }
+  .phone { width: 360px; max-width: 100%; margin: 0 auto; border-radius: 30px; overflow: hidden; box-shadow: 0 0 0 8px #000; touch-action: manipulation; user-select: none; }
+  canvas { display: block; width: 100%; height: auto; cursor: pointer; }
+  .row { display: flex; gap: 10px; justify-content: center; margin-top: 14px; flex-wrap: wrap; }
+  button { font: 600 16px Fredoka, sans-serif; border: 0; border-radius: 14px; padding: 8px 16px; background: #2b3157; color: var(--text); cursor: pointer; }
+  button.on { background: var(--accent); color: #2a1a00; }
+</style>
+</head>
+<body>
+<main>
+  <div class="intro">
+    <h1>Blast Quarry · taslak</h1>
+    <ul>
+      <li>Boş karelere dokunarak dinamit koy (tekrar dokununca kalkar), sonra <b>BLAST</b>.</li>
+      <li>Alev artı şeklinde 2 kare gider; <b>ilk kayada durur</b>, kayayı kırar. Kara taş duvarlar kırılmaz.</li>
+      <li><b>TNT varili</b> alev değince patlar ve kendi alevini 1 kare yayar: zincir! Az dinamitle çok yere ulaşmanın yolu bu.</li>
+      <li><b>Altın</b>a alev değerse olmaz. Bütün kayaları kır, altını koru.</li>
+      <li>Her tahta tam olarak verilen dinamitle çözülür, daha azıyla çözülmez. İki başarısız denemeden sonra ipucu düğmesi bir dinamitin yerini gösterir.</li>
+    </ul>
+  </div>
+  <div class="phone"><canvas id="board" width="360" height="640"></canvas></div>
+  <div class="row"><button id="easy" class="on">Kolay</button><button id="mid">Orta</button><button id="hard">Zor</button></div>
+</main>
+<script>
+(() => {
+  const W = 360, H = 640, TAU = Math.PI * 2;
+  const EMPTY = 0, WALL = 1, ROCK = 2, TNT = 3, GOLD = 4;
+  const BOMB_RANGE = 2, TNT_RANGE = 1;
+  const MODES = {
+    easy: { size: 6, bombs: 2, walls: 0.12, rocks: 0.3, tnt: 0, gold: 0, preview: true },
+    mid: { size: 7, bombs: 3, walls: 0.12, rocks: 0.28, tnt: 2, gold: 0, preview: true },
+    hard: { size: 7, bombs: 3, walls: 0.12, rocks: 0.28, tnt: 2, gold: 2, preview: false },
+  };
+  const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+
+  // --- Rules: one blast with chains ---------------------------------------------
+  // Returns {burned: Set of cells the flame reached, broken: rocks broken,
+  // gold: gold hit, waves: [[cells], ...] in order, for the animation}.
+  function blast(grid, n, bombs) {
+    const key = (x, y) => y * n + x;
+    const queue = bombs.map((b) => ({ x: b % n, y: Math.floor(b / n), range: BOMB_RANGE, wave: 0 }));
+    const fired = new Set(bombs);
+    const tntFired = new Set();
+    const burned = new Set(), broken = new Set(), gold = new Set();
+    const waves = [];
+    while (queue.length) {
+      const e = queue.shift();
+      (waves[e.wave] = waves[e.wave] || []).push(key(e.x, e.y));
+      burned.add(key(e.x, e.y));
+      for (const [dx, dy] of DIRS) {
+        for (let s = 1; s <= e.range; s++) {
+          const x = e.x + dx * s, y = e.y + dy * s;
+          if (x < 0 || y < 0 || x >= n || y >= n) break;
+          const k = key(x, y), cell = grid[k];
+          if (cell === WALL) break;
+          burned.add(k); (waves[e.wave] = waves[e.wave] || []).push(k);
+          if (cell === ROCK) { broken.add(k); break; }
+          if (cell === GOLD) { gold.add(k); break; }
+          if (cell === TNT) { if (!tntFired.has(k)) { tntFired.add(k); queue.push({ x, y, range: TNT_RANGE, wave: e.wave + 1 }); } break; }
+          if (fired.has(k) === false && bombs.includes(k)) { fired.add(k); queue.push({ x, y, range: BOMB_RANGE, wave: e.wave + 1 }); break; }
+        }
+      }
+    }
+    return { burned, broken, gold, waves };
+  }
+  function solved(grid, n, bombs) {
+    const r = blast(grid, n, bombs);
+    if (r.gold.size) return false;
+    for (let k = 0; k < grid.length; k++) if (grid[k] === ROCK && !r.broken.has(k)) return false;
+    return true;
+  }
+  // Every set of `count` bombs on empty cells, until one solves the board.
+  function findSolution(grid, n, count) {
+    const free = [];
+    for (let k = 0; k < grid.length; k++) if (grid[k] === EMPTY) free.push(k);
+    const pick = [];
+    let found = null;
+    (function walk(start) {
+      if (found) return;
+      if (pick.length === count) { if (solved(grid, n, pick)) found = pick.slice(); return; }
+      for (let i = start; i < free.length && !found; i++) { pick.push(free[i]); walk(i + 1); pick.pop(); }
+    })(0);
+    return found;
+  }
+  // A board built around a hidden solution: walls first, then the solution's
+  // dynamite, then rocks where its flames end (and TNT that carries a flame on
+  // to more rocks), then gold where no flame goes. Kept only when fewer bombs
+  // cannot clear it.
+  function makeBoard(mode) {
+    const n = mode.size, all = n * n;
+    const rnd = (k) => Math.floor(Math.random() * k);
+    for (let attempt = 0; attempt < 600; attempt++) {
+      const grid = new Array(all).fill(EMPTY);
+      for (let k = 0; k < Math.round(all * mode.walls); k++) grid[rnd(all)] = WALL;
+      const free = () => { const out = []; for (let k = 0; k < all; k++) if (grid[k] === EMPTY) out.push(k); return out; };
+      const solution = [];
+      while (solution.length < mode.bombs) {
+        const f = free().filter((k) => !solution.includes(k));
+        solution.push(f[rnd(f.length)]);
+      }
+      // Rocks at the end of most flames; sometimes a TNT barrel instead.
+      let tntLeft = mode.tnt;
+      for (const b of solution) {
+        const bx = b % n, by = Math.floor(b / n);
+        for (const [dx, dy] of DIRS) {
+          if (Math.random() < 0.2) continue;
+          const reach = 1 + rnd(BOMB_RANGE);
+          let x = bx, y = by, ok = true;
+          for (let st = 0; st < reach; st++) {
+            x += dx; y += dy;
+            if (x < 0 || y < 0 || x >= n || y >= n || grid[y * n + x] !== EMPTY || solution.includes(y * n + x)) { ok = false; break; }
+          }
+          if (!ok) continue;
+          const k = y * n + x;
+          if (tntLeft > 0 && Math.random() < 0.35) {
+            grid[k] = TNT; tntLeft--;
+            for (const [ex, ey] of DIRS) {
+              const tx = x + ex, ty = y + ey;
+              if (tx >= 0 && ty >= 0 && tx < n && ty < n && grid[ty * n + tx] === EMPTY && !solution.includes(ty * n + tx) && Math.random() < 0.7) grid[ty * n + tx] = ROCK;
+            }
+          } else grid[k] = ROCK;
+        }
+      }
+      if (tntLeft > 0) continue;
+      // Drop rocks and TNT the solution does not reach.
+      let r = blast(grid, n, solution);
+      for (let k = 0; k < all; k++) if ((grid[k] === ROCK && !r.broken.has(k)) || (grid[k] === TNT && !r.burned.has(k))) grid[k] = EMPTY;
+      r = blast(grid, n, solution);
+      // Gold where no flame goes, next to the action if possible.
+      const safe = free().filter((k) => !r.burned.has(k) && !solution.includes(k));
+      if (safe.length < mode.gold) continue;
+      safe.sort(() => Math.random() - 0.5);
+      for (let g = 0; g < mode.gold; g++) grid[safe[g]] = GOLD;
+      const rocks = grid.filter((cell) => cell === ROCK).length;
+      if (rocks < mode.bombs * 2 + 1 || !solved(grid, n, solution)) continue;
+      let easier = false;
+      for (let k = 1; k < mode.bombs && !easier; k++) if (findSolution(grid, n, k)) easier = true;
+      if (!easier) return { grid, n, solution };
+    }
+    return null;
+  }
+
+  // --- Game state -----------------------------------------------------------------
+  const canvas = document.getElementById("board");
+  const c = canvas.getContext("2d");
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  let mode = MODES.easy, board, bombs, tries, state, anim, result, hint, t = 0, last = performance.now();
+  const GRID = { x: 24, y: 150, size: 312 };
+  const cellSize = () => GRID.size / board.n;
+  const BTN = { blast: [100, 520, 160, 64], hint: [24, 532, 64, 48], reset: [272, 532, 64, 48] };
+
+  function newBoard() {
+    board = makeBoard(mode); bombs = []; tries = 0; state = "place"; anim = null; result = null; hint = null;
+  }
+  function inside(x, y, [bx, by, bw, bh]) { return x >= bx && x <= bx + bw && y >= by && y <= by + bh; }
+
+  canvas.addEventListener("pointerdown", (ev) => {
+    const r = canvas.getBoundingClientRect();
+    const x = (ev.clientX - r.left) * W / r.width, y = (ev.clientY - r.top) * H / r.height;
+    if (state === "won") { newBoard(); return; }
+    if (state === "boom") return;
+    if (state === "failed") { state = "place"; result = null; }
+    if (inside(x, y, BTN.blast)) {
+      if (bombs.length !== mode.bombs) return;
+      state = "boom"; anim = { t: 0, r: blast(board.grid, board.n, bombs) }; tries++;
+      return;
+    }
+    if (inside(x, y, BTN.hint) && tries >= 2 && !hint) {
+      hint = board.solution.find((k) => !bombs.includes(k));
+      return;
+    }
+    if (inside(x, y, BTN.reset)) { bombs = []; return; }
+    const cx = Math.floor((x - GRID.x) / cellSize()), cy = Math.floor((y - GRID.y) / cellSize());
+    if (cx < 0 || cy < 0 || cx >= board.n || cy >= board.n) return;
+    const k = cy * board.n + cx;
+    if (board.grid[k] !== EMPTY) return;
+    const at = bombs.indexOf(k);
+    if (at >= 0) bombs.splice(at, 1);
+    else if (bombs.length < mode.bombs) bombs.push(k);
+  });
+
+  function step(dt) {
+    if (state === "boom") {
+      anim.t += dt;
+      const total = anim.r.waves.length * 0.35 + 0.6;
+      if (anim.t >= total) {
+        const ok = anim.r.gold.size === 0 && board.grid.every((cell, k) => cell !== ROCK || anim.r.broken.has(k));
+        result = { ok, left: board.grid.filter((cell, k) => cell === ROCK && !anim.r.broken.has(k)).length, gold: anim.r.gold.size };
+        state = ok ? "won" : "failed";
+      }
+    }
+  }
+
+  // --- Drawing --------------------------------------------------------------------
+  function rr(x, y, w, h, r) { c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); }
+  function dot(x, y, r, f) { c.beginPath(); c.arc(x, y, r, 0, TAU); c.fillStyle = f; c.fill(); }
+
+  function drawRock(x, y, s, k) {
+    const j = (k * 37) % 7;
+    c.beginPath();
+    const pts = 8;
+    for (let i = 0; i < pts; i++) { const a = i * TAU / pts + j * 0.1, rad = s * (0.4 + ((k * 13 + i * 7) % 5) * 0.025); c.lineTo(x + Math.cos(a) * rad, y + Math.sin(a) * rad); }
+    c.closePath();
+    const g = c.createLinearGradient(x, y - s / 2, x, y + s / 2); g.addColorStop(0, "#c59a6b"); g.addColorStop(1, "#8a6038");
+    c.fillStyle = g; c.fill(); c.strokeStyle = "#5c3a1e"; c.lineWidth = 2; c.stroke();
+    c.beginPath(); c.moveTo(x - s * 0.15, y - s * 0.25); c.lineTo(x, y - s * 0.05); c.lineTo(x - s * 0.08, y + s * 0.12); c.moveTo(x, y - s * 0.05); c.lineTo(x + s * 0.18, y + s * 0.02);
+    c.strokeStyle = "rgba(60,35,15,0.7)"; c.lineWidth = 1.6; c.stroke();
+  }
+  function drawWall(x, y, s) {
+    rr(x - s / 2 + 2, y - s / 2 + 2, s - 4, s - 4, 6); c.fillStyle = "#3a3f4a"; c.fill();
+    rr(x - s / 2 + 2, y - s / 2 + 2, s - 4, s * 0.3, 6); c.fillStyle = "#4d5360"; c.fill();
+    c.strokeStyle = "rgba(0,0,0,0.35)"; c.lineWidth = 1.5; c.beginPath(); c.moveTo(x - s / 2 + 4, y + 2); c.lineTo(x + s / 2 - 4, y + 2); c.moveTo(x, y - s / 2 + 4); c.lineTo(x, y + 2); c.stroke();
+  }
+  function drawTnt(x, y, s) {
+    rr(x - s * 0.3, y - s * 0.36, s * 0.6, s * 0.72, s * 0.12); c.fillStyle = "#d9342b"; c.fill();
+    c.fillStyle = "#8a1d17"; c.fillRect(x - s * 0.3, y - s * 0.2, s * 0.6, s * 0.06); c.fillRect(x - s * 0.3, y + s * 0.14, s * 0.6, s * 0.06);
+    c.fillStyle = "#fff4d6"; c.font = `700 ${Math.round(s * 0.24)}px Fredoka, sans-serif`; c.textAlign = "center"; c.fillText("TNT", x, y + s * 0.08);
+  }
+  function drawGold(x, y, s) {
+    c.beginPath(); c.moveTo(x - s * 0.32, y + s * 0.18); c.lineTo(x - s * 0.2, y - s * 0.14); c.lineTo(x + s * 0.2, y - s * 0.14); c.lineTo(x + s * 0.32, y + s * 0.18); c.closePath();
+    const g = c.createLinearGradient(x, y - s * 0.14, x, y + s * 0.18); g.addColorStop(0, "#ffe27a"); g.addColorStop(1, "#d99a00"); c.fillStyle = g; c.fill();
+    c.strokeStyle = "#8a5a00"; c.lineWidth = 1.5; c.stroke();
+    const tw = Math.sin(t * 4 + x) * 0.5 + 0.5;
+    c.strokeStyle = `rgba(255,255,255,${tw})`; c.lineWidth = 2; c.beginPath(); c.moveTo(x + s * 0.12, y - s * 0.3); c.lineTo(x + s * 0.12, y - s * 0.18); c.moveTo(x + s * 0.06, y - s * 0.24); c.lineTo(x + s * 0.18, y - s * 0.24); c.stroke();
+  }
+  function drawDynamite(x, y, s, ghost) {
+    c.globalAlpha = ghost ? 0.45 : 1;
+    for (const dx of [-0.16, 0, 0.16]) { rr(x + dx * s - s * 0.08, y - s * 0.26, s * 0.16, s * 0.52, s * 0.05); c.fillStyle = "#e8452f"; c.fill(); c.strokeStyle = "#7a1d10"; c.lineWidth = 1; c.stroke(); }
+    c.fillStyle = "#3a2410"; c.fillRect(x - s * 0.26, y - s * 0.02, s * 0.52, s * 0.08);
+    c.strokeStyle = "#3a2410"; c.lineWidth = 2; c.beginPath(); c.moveTo(x, y - s * 0.26); c.quadraticCurveTo(x + s * 0.1, y - s * 0.4, x + s * 0.18, y - s * 0.36); c.stroke();
+    if (!ghost) dot(x + s * 0.18 + Math.sin(t * 20) * 1.5, y - s * 0.37, s * 0.05 + Math.sin(t * 25) * 1, "#ffd23f");
+    c.globalAlpha = 1;
+  }
+
+  function draw() {
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const bg = c.createLinearGradient(0, 0, 0, H); bg.addColorStop(0, "#3b2416"); bg.addColorStop(1, "#1f120a"); c.fillStyle = bg; c.fillRect(0, 0, W, H);
+    // Lantern glow and timber beams at the top.
+    c.fillStyle = "#6b4426"; c.fillRect(0, 0, W, 14); c.fillRect(30, 0, 14, 70); c.fillRect(316, 0, 14, 70);
+    c.textAlign = "center"; c.fillStyle = "#ffd88a"; c.font = "700 26px Fredoka, sans-serif"; c.fillText("BLAST QUARRY", 180, 52);
+    if (!board) { c.fillStyle = "#fff"; c.fillText("No board, try again", 180, 300); return; }
+    // Stock of dynamite and the message line.
+    c.font = "600 16px Fredoka, sans-serif"; c.fillStyle = "#f1cfa8";
+    const msg = state === "won" ? `Cleared in ${tries} ${tries === 1 ? "try" : "tries"}! Tap for a new board.`
+      : state === "failed" ? (result.gold ? "The gold got hit! Tap to adjust." : `${result.left} rock${result.left === 1 ? "" : "s"} left. Tap to adjust.`)
+      : state === "boom" ? "BOOM!" : `Place ${mode.bombs - bombs.length} more dynamite${mode.bombs - bombs.length === 1 ? "" : "s"}`;
+    c.fillText(msg, 180, 84);
+    for (let i = 0; i < mode.bombs; i++) drawDynamite(180 + (i - (mode.bombs - 1) / 2) * 40, 118, 34, i < bombs.length);
+    // Board.
+    const s = cellSize();
+    rr(GRID.x - 8, GRID.y - 8, GRID.size + 16, GRID.size + 16, 16); c.fillStyle = "#2a1a10"; c.fill();
+    const flame = state === "boom" ? Math.floor(anim.t / 0.35) : -1;
+    const burnedNow = new Set();
+    if (state === "boom") for (let w = 0; w <= flame && w < anim.r.waves.length; w++) for (const k of anim.r.waves[w]) burnedNow.add(k);
+    const preview = new Set();
+    if (mode.preview && state === "place") for (const b of bombs) for (const k of blast(board.grid, board.n, [b]).burned) preview.add(k);
+    for (let k = 0; k < board.grid.length; k++) {
+      const gx = k % board.n, gy = Math.floor(k / board.n);
+      const x = GRID.x + gx * s + s / 2, y = GRID.y + gy * s + s / 2;
+      rr(GRID.x + gx * s + 1.5, GRID.y + gy * s + 1.5, s - 3, s - 3, 6); c.fillStyle = (gx + gy) % 2 ? "#5a3a22" : "#634029"; c.fill();
+      if (preview.has(k)) { rr(GRID.x + gx * s + 1.5, GRID.y + gy * s + 1.5, s - 3, s - 3, 6); c.fillStyle = "rgba(255,170,60,0.28)"; c.fill(); }
+      const cell = board.grid[k];
+      const gone = (state === "boom" && burnedNow.has(k) && (cell === ROCK || cell === TNT)) || ((state === "won" || state === "failed") && anim && (anim.r.broken.has(k) || (cell === TNT && anim.r.burned.has(k))));
+      if (cell === WALL) drawWall(x, y, s);
+      else if (cell === ROCK && !gone) drawRock(x, y, s, k);
+      else if (cell === TNT && !gone) drawTnt(x, y, s);
+      else if (cell === GOLD) drawGold(x, y, s);
+      if (state === "failed" && cell === ROCK && !anim.r.broken.has(k)) { c.strokeStyle = "#ff6b6b"; c.lineWidth = 3; rr(GRID.x + gx * s + 3, GRID.y + gy * s + 3, s - 6, s - 6, 6); c.stroke(); }
+      if (state === "failed" && cell === GOLD && anim.r.gold.has(k)) { c.strokeStyle = "#ff6b6b"; c.lineWidth = 3; rr(GRID.x + gx * s + 3, GRID.y + gy * s + 3, s - 6, s - 6, 6); c.stroke(); }
+      if (bombs.includes(k) && !(state === "boom" && burnedNow.has(k))) drawDynamite(x, y, s, false);
+      if (hint === k && !bombs.includes(k)) { c.strokeStyle = "#7dffb0"; c.lineWidth = 3; c.setLineDash([5, 5]); rr(GRID.x + gx * s + 4, GRID.y + gy * s + 4, s - 8, s - 8, 6); c.stroke(); c.setLineDash([]); }
+      if (burnedNow.has(k)) {
+        const local = anim.t - flame * 0.35;
+        const a = Math.max(0, 1 - local / 0.6);
+        const g = c.createRadialGradient(x, y, 2, x, y, s * 0.6);
+        g.addColorStop(0, `rgba(255,240,180,${a})`); g.addColorStop(0.5, `rgba(255,140,30,${a * 0.9})`); g.addColorStop(1, "rgba(200,40,10,0)");
+        c.fillStyle = g; c.fillRect(x - s * 0.6, y - s * 0.6, s * 1.2, s * 1.2);
+      }
+    }
+    // Buttons.
+    const ready = bombs.length === mode.bombs && state === "place";
+    const [bx, by, bw, bh] = BTN.blast;
+    rr(bx, by + 6, bw, bh, 20); c.fillStyle = ready ? "#a8320f" : "#4a3020"; c.fill();
+    rr(bx, by, bw, bh, 20); c.fillStyle = ready ? "#ff7a1a" : "#6b4a33"; c.fill();
+    c.fillStyle = ready ? "#fff4d6" : "#a88a70"; c.font = "700 26px Fredoka, sans-serif"; c.fillText("BLAST", bx + bw / 2, by + 42);
+    const [hx, hy, hw, hh] = BTN.hint;
+    rr(hx, hy, hw, hh, 16); c.fillStyle = tries >= 2 && !hint ? "#2f9e5b" : "#4a3020"; c.fill();
+    c.fillStyle = "#fff4d6"; c.font = "600 15px Fredoka, sans-serif"; c.fillText("Hint", hx + hw / 2, hy + 30);
+    const [rx, ry, rw, rh] = BTN.reset;
+    rr(rx, ry, rw, rh, 16); c.fillStyle = "#4a3020"; c.fill(); c.fillStyle = "#fff4d6"; c.fillText("Clear", rx + rw / 2, ry + 30);
+    c.font = "600 14px Fredoka, sans-serif"; c.fillStyle = "#a88a70";
+    c.fillText(mode.preview ? "Orange shows where the flame reaches." : "No preview: picture the blast yourself.", 180, 620);
+  }
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000); last = now; t += dt;
+    step(dt); draw(); requestAnimationFrame(frame);
+  }
+  newBoard();
+  requestAnimationFrame(frame);
+  for (const id of Object.keys(MODES)) document.getElementById(id).onclick = () => {
+    mode = MODES[id];
+    for (const other of Object.keys(MODES)) document.getElementById(other).classList.toggle("on", other === id);
+    newBoard();
+  };
+})();
+</script>
+</body>
+</html>
