@@ -13,7 +13,8 @@ canvas{display:block;margin:0 auto}
 <canvas id="c"></canvas>
 <script>
 // Deja View, draft 1: a hotel hallway that keeps coming back. Spot the change.
-const W = 360, H = 640, TOP = 70, BOT = 486, VPY = 262, ZF = 9, GOAL = 6;
+const W = 360, H = 640, TOP = 70, BOT = 486, VPY = 262, ZF0 = 9, GOAL = 6;
+let ZF = ZF0;
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 let scale = 1, dpr = 1;
 function resize() {
@@ -49,7 +50,7 @@ const WOOD = '#4e2e1d', WALL = '#7d6749', WALL2 = '#6a573e', WAIN = '#3a271c', R
   CARPET = '#5c1b23', GOLD = '#b8944c', CEIL = '#3e372f', BRASS = '#c49b54';
 function hex(c) { c = c.replace('#', ''); return [parseInt(c.slice(0, 2), 16), parseInt(c.slice(2, 4), 16), parseInt(c.slice(4, 6), 16)]; }
 const FOGMAX = .56;
-function fogf(z) { return Math.min(FOGMAX, Math.pow(Math.max(0, (z - 1) / (ZF - 1)), .85) * FOGMAX); }
+function fogf(z) { return Math.min(FOGMAX, Math.pow(Math.max(0, (z - 1) / (ZF0 - 1)), .85) * FOGMAX); }
 function sh(c, z, a = 1, k = 1) {
   const [r, g, b] = hex(c), f = fogf(z);
   const m = k * light.level;
@@ -65,7 +66,7 @@ function strokePoly(pts, col, lw) { poly(pts); ctx.strokeStyle = col; ctx.lineWi
 function wallQuad(s, z0, z1, h0, h1) { return [proj(s, h0, z0), proj(s, h0, z1), proj(s, h1, z1), proj(s, h1, z0)]; }
 function flatQuad(x0, x1, z0, z1, h) { return [proj(x0, h, z0), proj(x1, h, z0), proj(x1, h, z1), proj(x0, h, z1)]; }
 function rrect(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
-const ZS = [1, 1.25, 1.6, 2, 2.6, 3.4, 4.4, 5.6, 7, 9];
+const ZS = [1, 1.25, 1.6, 2, 2.6, 3.4, 4.4, 5.6, 7, 9, 11.5];
 function zgrad(axis, coord, col) {
   const near = coord(1), far = coord(ZF);
   const g = axis === 'y' ? ctx.createLinearGradient(0, near, 0, far) : ctx.createLinearGradient(near, 0, far, 0);
@@ -95,14 +96,15 @@ function baseScene() {
       { id: 'PR', side: 1, z0: 3.6, z1: 4.6, h0: .42, h1: .62, kind: 'landscape', flip: false, moon: false, big: false, present: true }],
     ceil: [{ z: 2.2, on: true, flicker: false }, { z: 4.2, on: true, flicker: false }, { z: 6.2, on: true, flicker: false }, { z: 8.2, on: true, flicker: false }],
     red: false,
-    exitSign: { z: 3.0, arrow: 1 },
+    exitSign: { z: 3.0, arrow: 1, text: 'EXIT' },
     table: { z0: 2.85, z1: 3.85, dead: false },
     tray: { z: 2.05, cups: 2 },
     extinguisher: true,
-    clock: { z: 1.85, h: .63, hour: 10, min: 10 },
+    clock: { z: 1.85, h: .63, hour: 10, min: 10, backwards: false },
     plant: { present: true, dead: false },
     elevator: { open: 0, dark: false, lit: false },
     carpetBorder: true, figure: false, footprints: false, extraDoor: false,
+    len: ZF0, bigExtinguisher: false, floorText: '4TH FLOOR', uiSwap: false, uiLie: false, creep: false,
   };
 }
 const byId = (list, id) => list.find(o => o.id === id);
@@ -123,9 +125,14 @@ const ANOMALIES = [
   { id: 'red_light', tier: 1, text: 'The lights were red.', apply: s => { s.red = true; return hl(proj(0, .9, 3.2), 90); } },
   { id: 'footprints', tier: 1, text: 'There were wet footprints on the carpet.', apply: s => { s.footprints = true; return hl(proj(0, 0, 2.6), 70); } },
   { id: 'dnd_all', tier: 1, text: 'Every door said DO NOT DISTURB.', apply: s => { s.doors.forEach(d => d.dnd = true); return hlDoor(byId(s.doors, 'A')); } },
-  { id: 'elevator_open', tier: 1, text: 'The elevator stood open.', apply: s => { s.elevator.open = 1; s.elevator.dark = true; return hl(proj(0, .4, ZF), 30); } },
+  { id: 'elevator_open', tier: 1, text: 'The elevator stood open.', apply: s => { s.elevator.open = 1; s.elevator.dark = true; return hl(proj(0, .4, ZF0), 30); } },
   { id: 'painting_door', tier: 1, text: 'There was a door where the painting was.', apply: s => { const p = byId(s.paintings, 'PL'); p.present = false; s.extraDoor = true; return hlPainting(p); } },
+  { id: 'giant_extinguisher', tier: 1, text: 'The fire extinguisher was twice as big.', apply: s => { s.bigExtinguisher = true; return hl(proj(.9, .3, 1.4), 80); } },
   // Tier 2: look closer.
+  { id: 'no_exit', tier: 2, text: 'The sign said NO EXIT.', apply: s => { s.exitSign.text = 'NO EXIT'; return hl(proj(0, .88, s.exitSign.z), 34); } },
+  { id: 'clock_backwards', tier: 2, text: 'The clock ran backwards.', apply: s => { s.clock.backwards = true; return hl(proj(.98, s.clock.h, s.clock.z), 34); } },
+  { id: 'floor_13', tier: 2, text: 'The floor sign said 13TH FLOOR.', apply: s => { s.floorText = '13TH FLOOR'; return hl(proj(.98, .6, 1.27), 44); } },
+  { id: 'button_lie', tier: 2, ui: true, text: "The button said DON'T TURN instead of Turn back.", apply: s => { s.uiLie = true; return null; } },
   { id: 'door_colour', tier: 2, text: 'A door had another colour.', apply: s => { const d = byId(s.doors, 'D'); d.color = '#2c4a46'; return hlDoor(d); } },
   { id: 'numbers_swapped', tier: 2, text: 'Rooms 401 and 402 had swapped numbers.', apply: s => { byId(s.doors, 'A').num = '402'; byId(s.doors, 'D').num = '401'; return hl(proj(0, .62, 2.3), 92); } },
   { id: 'exit_arrow', tier: 2, text: 'The EXIT arrow pointed the other way.', apply: s => { s.exitSign.arrow = -1; return hl(proj(0, .88, s.exitSign.z), 32); } },
@@ -138,6 +145,13 @@ const ANOMALIES = [
   { id: 'portrait_eyes', tier: 2, text: 'The lady in the portrait had her eyes open.', apply: s => { const p = byId(s.paintings, 'PL'); p.eyes = true; return hlPainting(p); } },
   { id: 'ceiling_flicker', tier: 2, text: 'A ceiling light was flickering.', apply: s => { s.ceil[1].flicker = true; return hl(proj(0, 1, s.ceil[1].z), 40); } },
   // Tier 3: small things.
+  { id: 'exit_typo', tier: 3, text: 'The sign said EX1T.', apply: s => { s.exitSign.text = 'EX1T'; return hl(proj(0, .88, s.exitSign.z), 30); } },
+  { id: 'longer_hall', tier: 3, text: 'The hallway was longer, with two more doors.', apply: s => { s.len = 11.5;
+      s.doors.push({ id: 'G', side: -1, z0: 9.3, z1: 10.0, num: '407', color: WOOD, handle: 'far', dnd: false, open: 0, eyes: false, present: true },
+        { id: 'H', side: 1, z0: 9.6, z1: 10.3, num: '408', color: WOOD, handle: 'far', dnd: false, open: 0, eyes: false, present: true });
+      s.ceil.push({ z: 10.2, on: true, flicker: false }); return hl(proj(0, .4, 9), 44); } },
+  { id: 'button_swap', tier: 3, ui: true, text: 'Turn back and Go on had swapped places.', apply: s => { s.uiSwap = true; return null; } },
+  { id: 'closing_in', tier: 3, text: 'The hallway was slowly closing in.', apply: s => { s.creep = true; return hl(proj(0, .5, 3), 92); } },
   { id: 'number_digit', tier: 3, text: 'Room 401 was numbered 410.', apply: s => { const d = byId(s.doors, 'A'); d.num = '410'; return hl(proj(-.98, .655, 2.05), 30); } },
   { id: 'handle_side', tier: 3, text: 'A door handle was on the wrong side.', apply: s => { const d = byId(s.doors, 'D'); d.handle = 'near'; return hlDoor(d); } },
   { id: 'carpet_line', tier: 3, text: 'The gold line on the carpet was gone.', apply: s => { s.carpetBorder = false; return hl(proj(0, 0, 1.8), 80); } },
@@ -295,7 +309,10 @@ function drawPortrait(p, z) {
     ctx.fillStyle = sh('#f1eadb', z);
     for (const x of [44.5, 55.5]) { ctx.beginPath(); ctx.ellipse(x, 37, 3, 2, 0, 0, 7); ctx.fill(); }
     ctx.fillStyle = '#120808';
-    for (const x of [44.5, 55.5]) { ctx.beginPath(); ctx.arc(x, 37, 1.3, 0, 7); ctx.fill(); }
+    // The pupils follow the finger or the mouse.
+    const pc = proj(-.98, .53, 4.65), lx = (look[0] - cam.tx) / cam.z, ly = (look[1] - cam.ty) / cam.z;
+    const ox = Math.max(-1, Math.min(1, (lx - pc[0]) / 50)) * 1.5, oy = Math.max(-1, Math.min(1, (ly - pc[1]) / 80)) * .7;
+    for (const x of [44.5, 55.5]) { ctx.beginPath(); ctx.arc(x + ox, 37 + oy, 1.3, 0, 7); ctx.fill(); }
   } else {
     ctx.strokeStyle = sh('#3a2216', z); ctx.lineWidth = 1.2;
     for (const x of [44.5, 55.5]) { ctx.beginPath(); ctx.arc(x, 36, 3, .2, Math.PI - .2); ctx.stroke(); }
@@ -385,7 +402,8 @@ function drawExitSign(s) {
   ctx.fillStyle = '#0d2a1b'; rrect(c[0] - w / 2, c[1] - h / 2, w, h, 1.5); ctx.fill();
   ctx.strokeStyle = 'rgba(110,255,170,.55)'; ctx.lineWidth = .8; ctx.stroke();
   ctx.fillStyle = '#8dffb9'; ctx.font = `bold ${(.1 * k).toFixed(1)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText('EXIT', c[0] - e.arrow * .08 * k, c[1] + .5);
+  if (e.text.length > 4) ctx.font = `bold ${(.068 * k).toFixed(1)}px system-ui, sans-serif`;
+  ctx.fillText(e.text, c[0] - e.arrow * .08 * k, c[1] + .5);
   const ax = c[0] + e.arrow * .19 * k, ah = .045 * k;
   ctx.beginPath(); ctx.moveTo(ax + e.arrow * ah, c[1]); ctx.lineTo(ax - e.arrow * ah * .6, c[1] - ah); ctx.lineTo(ax - e.arrow * ah * .6, c[1] + ah); ctx.closePath(); ctx.fill();
   ctx.textBaseline = 'alphabetic';
@@ -402,13 +420,25 @@ function drawClock(s) {
     ctx.strokeStyle = sh('#1a1008', z); ctx.lineCap = 'round';
     ctx.lineWidth = 2.4; ctx.beginPath(); ctx.moveTo(20, 20); ctx.lineTo(20 + Math.sin(ha) * 8, 20 - Math.cos(ha) * 8); ctx.stroke();
     ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(20, 20); ctx.lineTo(20 + Math.sin(ma) * 12.5, 20 - Math.cos(ma) * 12.5); ctx.stroke();
+    const sec = Math.floor(T) % 60, sa = (c.backwards ? -1 : 1) * sec / 60 * Math.PI * 2;
+    ctx.strokeStyle = sh('#b0302a', z); ctx.lineWidth = .8; ctx.beginPath(); ctx.moveTo(20 - Math.sin(sa) * 3, 20 + Math.cos(sa) * 3); ctx.lineTo(20 + Math.sin(sa) * 14, 20 - Math.cos(sa) * 14); ctx.stroke();
+    ctx.fillStyle = sh('#1a1008', z); ctx.beginPath(); ctx.arc(20, 20, 1.4, 0, 7); ctx.fill();
     ctx.lineCap = 'butt';
+  });
+}
+
+function drawPlaque(s) {
+  const z0 = 1.12, z1 = 1.42, zm = 1.27;
+  fillPoly(wallQuad(1, z0 - .02, z1 + .02, .555, .645), sh('#2a1a0c', zm));
+  fillPoly(wallQuad(1, z0, z1, .565, .635), sh(BRASS, zm, 1, 1.05));
+  wallSpace(1, z0, z1, .565, .635, 60, 16, () => {
+    ctx.fillStyle = sh('#2a1a0c', zm); ctx.font = 'bold 9px Georgia, serif'; ctx.textAlign = 'center'; ctx.fillText(s.floorText, 30, 11.5);
   });
 }
 
 function drawExtinguisher(s) {
   if (!s.extinguisher) return;
-  const z = 1.4, k = K(z), b = proj(.935, .05, z);
+  const z = 1.4, k = K(z) * (s.bigExtinguisher ? 1.9 : 1), b = proj(.935, .05, z);
   const w = .13 * k, h = .42 * k, x = b[0] - w / 2, y = b[1] - h;
   ctx.fillStyle = sh('#2a2220', z); ctx.fillRect(x - .02 * k, y + .1 * k, w + .04 * k, .03 * k);
   const g = ctx.createLinearGradient(x, 0, x + w, 0);
@@ -494,6 +524,7 @@ function drawFigure(s) {
 }
 
 function drawScene(s) {
+  ZF = s.len;
   drawShell(s);
   drawElevator(s);
   for (const c of s.ceil) drawCeilLight(c, s);
@@ -505,6 +536,7 @@ function drawScene(s) {
   for (const o of s.sconces) items.push([o.z, () => drawSconce(o)]);
   items.push([s.clock.z, () => drawClock(s)]);
   items.push([1.4, () => drawExtinguisher(s)]);
+  items.push([1.27, () => drawPlaque(s)]);
   items.push([3.3, () => drawTable(s)]);
   items.push([s.tray.z, () => drawTray(s)]);
   items.push([1.18, () => drawPlant(s)]);
@@ -615,7 +647,7 @@ function pickAnomaly(n) {
   return pool[Math.floor(rnd() * pool.length)];
 }
 function makeHall(n, forceId) {
-  scene = baseScene(); anomaly = null; mark = null;
+  scene = baseScene(); anomaly = null; mark = null; hallT = 0;
   if (forceId) anomaly = ANOMALIES.find(a => a.id === forceId) || null;
   else if (n > 0 && rnd() < .5) anomaly = pickAnomaly(n);
   if (anomaly) { mark = anomaly.apply(scene); used.add(anomaly.id); lastId = anomaly.id; }
@@ -648,7 +680,7 @@ function decide(turnBack) {
   if (hall > 0) sRight();
   anim = { kind: turnBack ? 'turn' : 'walk', t: 0, dur: 1.2, then: () => { hall++; makeHall(hall); }, done: false };
 }
-let revealT = 0;
+let revealT = 0, hallT = 0;
 function startOver() {
   if (state !== 'reveal' || anim) return;
   sClick(); audio();
@@ -686,6 +718,7 @@ const BTN_BACK = [16, 530, 160, 70], BTN_ON = [184, 530, 160, 70], BTN_WIDE = [6
 function pagePos(e) { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) / scale, (e.clientY - r.top) / scale]; }
 cv.addEventListener('pointerdown', e => {
   const [x, y] = pagePos(e);
+  look = [x, y];
   e.preventDefault();
   if (state === 'intro') { if (hit(x, y, [BTN_CARD[0], cardBtnY, BTN_CARD[2], BTN_CARD[3]])) { audio(); sClick(); startRun(); } return; }
   if (state === 'win') { if (hit(x, y, [BTN_CARD[0], cardBtnY, BTN_CARD[2], BTN_CARD[3]])) { sClick(); startRun(); } return; }
@@ -702,8 +735,9 @@ cv.addEventListener('pointerdown', e => {
     return;
   }
   if (state === 'reveal') { if (hit(x, y, BTN_WIDE)) startOver(); return; }
-  if (hit(x, y, BTN_BACK)) decide(true);
-  else if (hit(x, y, BTN_ON)) decide(false);
+  const [rb, ro] = buttonRects();
+  if (hit(x, y, rb)) decide(true);
+  else if (hit(x, y, ro)) decide(false);
 });
 cv.addEventListener('pointermove', e => {
   if (!pointers.has(e.pointerId)) return;
@@ -721,6 +755,8 @@ cv.addEventListener('pointermove', e => {
     if (Math.hypot(x - lastTap.x, y - lastTap.y) > 12) lastTap.t = -1;
   }
 });
+let look = [180, 300];
+cv.addEventListener('pointermove', e => { look = pagePos(e); });
 function pointerEnd(e) { pointers.delete(e.pointerId); if (pointers.size < 2) pinch = null; }
 cv.addEventListener('pointerup', pointerEnd);
 cv.addEventListener('pointercancel', pointerEnd);
@@ -791,6 +827,8 @@ function button(r, label, icon, top, bottom, edge, ink, enabled, pressed) {
   ctx.restore();
 }
 
+function buttonRects() { return scene.uiSwap ? [BTN_ON, BTN_BACK] : [BTN_BACK, BTN_ON]; }
+
 function drawPanel() {
   const g = ctx.createLinearGradient(0, BOT, 0, H); g.addColorStop(0, '#0d0a0b'); g.addColorStop(1, '#070506');
   ctx.fillStyle = g; ctx.fillRect(0, BOT, W, H - BOT);
@@ -814,8 +852,9 @@ function drawPanel() {
   ctx.fillText(hall === 0 ? 'Pinch or double-tap the hallway to look closer.' : 'Anything different? Turn back.  All the same? Go on.', 180, 512);
   const busy = !!anim;
   const pb = press && press.which === 'back' && press.t < .15, po = press && press.which === 'on' && press.t < .15;
-  button(BTN_BACK, 'Turn back', 'back', '#5e2128', '#381116', '#8c3d44', '#f6dcd6', hall > 0 && !busy, pb);
-  button(BTN_ON, 'Go on', 'on', '#2f5a3e', '#1b3626', '#5f9a70', '#e0f5e4', !busy, po);
+  const [rb, ro] = buttonRects();
+  button(rb, scene.uiLie ? "DON'T TURN" : 'Turn back', 'back', '#5e2128', '#381116', '#8c3d44', '#f6dcd6', hall > 0 && !busy, pb);
+  button(ro, 'Go on', 'on', '#2f5a3e', '#1b3626', '#5f9a70', '#e0f5e4', !busy, po);
   ctx.fillStyle = '#5c4f42'; ctx.font = '10px system-ui, sans-serif';
   ctx.textAlign = 'left'; ctx.fillText(`wrong turns ${stats.wrong}`, 18, 626);
   ctx.textAlign = 'right'; ctx.fillText(`hallways walked ${stats.halls}`, 342, 626);
@@ -860,6 +899,7 @@ function frame(now) {
   const dt = Math.min(.05, (now - last) / 1000); last = now; T += dt;
   if (press) press.t += dt;
   if (state === 'reveal') revealT += dt;
+  if (state === 'hall' && !anim) hallT += dt;
   if (pointers.size === 0) { const e = Math.min(1, dt * 10); cam.z += (camTo.z - cam.z) * e; cam.tx += (camTo.tx - cam.tx) * e; cam.ty += (camTo.ty - cam.ty) * e; }
   ctx.setTransform(dpr * scale, 0, 0, dpr * scale, 0, 0);
   ctx.fillStyle = '#050405'; ctx.fillRect(0, 0, W, H);
@@ -868,6 +908,7 @@ function frame(now) {
   ctx.save(); ctx.beginPath(); ctx.rect(0, TOP, W, BOT - TOP); ctx.clip();
   let black = 0;
   ctx.translate(cam.tx, cam.ty); ctx.scale(cam.z, cam.z);
+  if (scene.creep) { const c = 1 + Math.min(.3, hallT * .022); ctx.translate(180, VPY); ctx.scale(c, c); ctx.translate(-180, -VPY); }
   if (anim) {
     anim.t += dt;
     const half = anim.dur / 2;
