@@ -48,7 +48,8 @@ const FOG = [7, 5, 8];
 const WOOD = '#4e2e1d', WALL = '#7d6749', WALL2 = '#6a573e', WAIN = '#3a271c', RAIL = '#9c7b47',
   CARPET = '#5c1b23', GOLD = '#b8944c', CEIL = '#3e372f', BRASS = '#c49b54';
 function hex(c) { c = c.replace('#', ''); return [parseInt(c.slice(0, 2), 16), parseInt(c.slice(2, 4), 16), parseInt(c.slice(4, 6), 16)]; }
-function fogf(z) { return Math.min(.66, Math.pow(Math.max(0, (z - 1) / (ZF - 1)), .85) * .66); }
+const FOGMAX = .56;
+function fogf(z) { return Math.min(FOGMAX, Math.pow(Math.max(0, (z - 1) / (ZF - 1)), .85) * FOGMAX); }
 function sh(c, z, a = 1, k = 1) {
   const [r, g, b] = hex(c), f = fogf(z);
   const m = k * light.level;
@@ -329,7 +330,7 @@ function drawSconce(o) {
   ctx.beginPath(); ctx.moveTo(p[0] - .05 * k, p[1] - .1 * k); ctx.lineTo(p[0] + .05 * k, p[1] - .1 * k); ctx.lineTo(p[0] + .075 * k, p[1] + .01 * k); ctx.lineTo(p[0] - .075 * k, p[1] + .01 * k); ctx.closePath(); ctx.fill();
 }
 
-function depthDim(z) { return Math.max(.08, 1 - fogf(z) / .66 * .92); }
+function depthDim(z) { return Math.max(.1, 1 - fogf(z) / FOGMAX * .9); }
 function sconceGlow(o) {
   if (!o.present || !o.on) return;
   const dd = depthDim(o.z);
@@ -541,7 +542,7 @@ function drawAtmosphere() {
   }
   ctx.globalCompositeOperation = 'source-over';
   const v = ctx.createRadialGradient(180, VPY, 50, 180, VPY + 20, 330);
-  v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(.6, 'rgba(0,0,0,.25)'); v.addColorStop(1, 'rgba(0,0,0,.8)');
+  v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(.6, 'rgba(0,0,0,.14)'); v.addColorStop(1, 'rgba(0,0,0,.6)');
   ctx.fillStyle = v; ctx.fillRect(0, TOP, W, BOT - TOP);
   if (grain && ctx.createPattern) {
     const pat = ctx.createPattern(grain, 'repeat');
@@ -620,6 +621,7 @@ function makeHall(n, forceId) {
   if (anomaly) { mark = anomaly.apply(scene); used.add(anomaly.id); lastId = anomaly.id; }
 }
 function startRun() {
+  resetCam(true);
   hall = 0; stats = { halls: 0, wrong: 0, t0: performance.now(), t1: 0 }; used = new Set(); lastId = '';
   makeHall(0); state = 'hall';
 }
@@ -627,13 +629,16 @@ function decide(turnBack) {
   if (state !== 'hall' || anim) return;
   if (hall === 0 && turnBack) return;
   audio(); sClick();
+  resetCam(true);
   press = { which: turnBack ? 'back' : 'on', t: 0 };
   const right = hall === 0 || (anomaly !== null) === turnBack;
   stats.halls++;
   if (!right) {
     stats.wrong++;
     wasWrongType = anomaly ? 'missed' : 'false';
-    state = 'reveal'; revealT = 0; sWrong(); return;
+    state = 'reveal'; revealT = 0; sWrong();
+    if (anomaly && mark) focusOn(mark.x, mark.y, mark.r > 70 ? 1.3 : 1.8);
+    return;
   }
   if (hall === GOAL) {
     // The way out: the elevator opens on light.
@@ -647,26 +652,92 @@ let revealT = 0;
 function startOver() {
   if (state !== 'reveal' || anim) return;
   sClick(); audio();
+  resetCam(true);
   anim = { kind: 'walk', t: 0, dur: 1.4, then: () => { hall = 0; makeHall(0); state = 'hall'; }, done: false };
   sSteps(4, .3);
 }
 
+// ---------- camera (zoom and pan)
+const ZMAX = 3.2;
+const cam = { z: 1, tx: 0, ty: 0 }, camTo = { z: 1, tx: 0, ty: 0 };
+function clampCam(c) {
+  c.z = Math.max(1, Math.min(ZMAX, c.z));
+  c.tx = Math.min(0, Math.max(W - W * c.z, c.tx));
+  c.ty = Math.min(TOP - TOP * c.z, Math.max(BOT - BOT * c.z, c.ty));
+  return c;
+}
+function zoomAt(c, fx, fy, z2) {
+  z2 = Math.max(1, Math.min(ZMAX, z2));
+  c.tx = fx - (fx - c.tx) * z2 / c.z; c.ty = fy - (fy - c.ty) * z2 / c.z; c.z = z2;
+  return clampCam(c);
+}
+function camNow() { Object.assign(camTo, cam); }
+function resetCam(now) { Object.assign(camTo, { z: 1, tx: 0, ty: 0 }); if (now) Object.assign(cam, camTo); }
+function focusOn(x, y, z) { Object.assign(camTo, clampCam({ z, tx: 180 - x * z, ty: (TOP + BOT) / 2 - y * z })); }
+function toScreen(x, y) { return [x * cam.z + cam.tx, y * cam.z + cam.ty]; }
+const ZOOM_CHIP = [W - 74, TOP + 10, 62, 26];
+const pointers = new Map();
+let lastTap = { t: -1, x: 0, y: 0 }, pinch = null;
+function canLook() { return (state === 'hall' || state === 'reveal') && !anim; }
+
 // ---------- input
 function hit(x, y, r) { return x >= r[0] && x <= r[0] + r[2] && y >= r[1] && y <= r[1] + r[3]; }
 const BTN_BACK = [16, 530, 160, 70], BTN_ON = [184, 530, 160, 70], BTN_WIDE = [60, 566, 240, 58], BTN_CARD = [70, 0, 220, 58];
+function pagePos(e) { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) / scale, (e.clientY - r.top) / scale]; }
 cv.addEventListener('pointerdown', e => {
-  const r = cv.getBoundingClientRect(), x = (e.clientX - r.left) / scale, y = (e.clientY - r.top) / scale;
+  const [x, y] = pagePos(e);
   e.preventDefault();
   if (state === 'intro') { if (hit(x, y, [BTN_CARD[0], cardBtnY, BTN_CARD[2], BTN_CARD[3]])) { audio(); sClick(); startRun(); } return; }
   if (state === 'win') { if (hit(x, y, [BTN_CARD[0], cardBtnY, BTN_CARD[2], BTN_CARD[3]])) { sClick(); startRun(); } return; }
+  if (canLook() && y > TOP && y < BOT) {
+    if (cam.z > 1.04 && hit(x, y, ZOOM_CHIP)) { resetCam(false); return; }
+    try { cv.setPointerCapture(e.pointerId); } catch (err) { /* not supported */ }
+    pointers.set(e.pointerId, [x, y]);
+    if (pointers.size === 2) { const [a, b] = [...pointers.values()]; pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), m: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] }; return; }
+    const now = performance.now();
+    if (now - lastTap.t < 320 && Math.hypot(x - lastTap.x, y - lastTap.y) < 34) {
+      if (camTo.z > 1.3) resetCam(false); else { const c = Object.assign({}, cam); Object.assign(camTo, zoomAt(c, x, y, 2.4)); }
+      lastTap.t = -1;
+    } else lastTap = { t: now, x, y };
+    return;
+  }
   if (state === 'reveal') { if (hit(x, y, BTN_WIDE)) startOver(); return; }
   if (hit(x, y, BTN_BACK)) decide(true);
   else if (hit(x, y, BTN_ON)) decide(false);
 });
+cv.addEventListener('pointermove', e => {
+  if (!pointers.has(e.pointerId)) return;
+  const [x, y] = pagePos(e), prev = pointers.get(e.pointerId);
+  pointers.set(e.pointerId, [x, y]);
+  if (!canLook()) return;
+  if (pointers.size >= 2 && pinch) {
+    const [a, b] = [...pointers.values()];
+    const d = Math.hypot(a[0] - b[0], a[1] - b[1]), m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    zoomAt(cam, m[0], m[1], cam.z * d / Math.max(1, pinch.d));
+    cam.tx += m[0] - pinch.m[0]; cam.ty += m[1] - pinch.m[1]; clampCam(cam);
+    pinch = { d, m }; camNow();
+  } else if (pointers.size === 1 && cam.z > 1) {
+    cam.tx += x - prev[0]; cam.ty += y - prev[1]; clampCam(cam); camNow();
+    if (Math.hypot(x - lastTap.x, y - lastTap.y) > 12) lastTap.t = -1;
+  }
+});
+function pointerEnd(e) { pointers.delete(e.pointerId); if (pointers.size < 2) pinch = null; }
+cv.addEventListener('pointerup', pointerEnd);
+cv.addEventListener('pointercancel', pointerEnd);
+cv.addEventListener('wheel', e => {
+  e.preventDefault();
+  if (!canLook()) return;
+  const [x, y] = pagePos(e);
+  if (y < TOP || y > BOT) return;
+  zoomAt(camTo, x, y, camTo.z * Math.exp(-e.deltaY * .0016));
+}, { passive: false });
 addEventListener('keydown', e => {
   const k = e.key;
   if (state === 'intro' || state === 'win') { if (k === 'Enter' || k === ' ') { audio(); startRun(); } return; }
   if (state === 'reveal') { if (k === 'Enter' || k === ' ') startOver(); return; }
+  if (k === '+' || k === '=') zoomAt(camTo, 180, (TOP + BOT) / 2, camTo.z * 1.4);
+  if (k === '-') zoomAt(camTo, 180, (TOP + BOT) / 2, camTo.z / 1.4);
+  if (k === '0') resetCam(false);
   if (k === 'ArrowLeft' || k === 'a' || k === 'ArrowDown') decide(true);
   if (k === 'ArrowRight' || k === 'd' || k === 'ArrowUp') decide(false);
 });
@@ -740,7 +811,7 @@ function drawPanel() {
   }
   if (state !== 'hall') return;
   ctx.fillStyle = '#9a8670'; ctx.font = '11.5px system-ui, sans-serif';
-  ctx.fillText(hall === 0 ? 'Remember this hallway, then go on.' : 'Anything different? Turn back.  All the same? Go on.', 180, 512);
+  ctx.fillText(hall === 0 ? 'Pinch or double-tap the hallway to look closer.' : 'Anything different? Turn back.  All the same? Go on.', 180, 512);
   const busy = !!anim;
   const pb = press && press.which === 'back' && press.t < .15, po = press && press.which === 'on' && press.t < .15;
   button(BTN_BACK, 'Turn back', 'back', '#5e2128', '#381116', '#8c3d44', '#f6dcd6', hall > 0 && !busy, pb);
@@ -789,12 +860,14 @@ function frame(now) {
   const dt = Math.min(.05, (now - last) / 1000); last = now; T += dt;
   if (press) press.t += dt;
   if (state === 'reveal') revealT += dt;
+  if (pointers.size === 0) { const e = Math.min(1, dt * 10); cam.z += (camTo.z - cam.z) * e; cam.tx += (camTo.tx - cam.tx) * e; cam.ty += (camTo.ty - cam.ty) * e; }
   ctx.setTransform(dpr * scale, 0, 0, dpr * scale, 0, 0);
   ctx.fillStyle = '#050405'; ctx.fillRect(0, 0, W, H);
   // Flicker of the whole hall's light, very slight.
   light.level = 1 - (Math.sin(T * 61) > .995 ? .12 : 0);
   ctx.save(); ctx.beginPath(); ctx.rect(0, TOP, W, BOT - TOP); ctx.clip();
   let black = 0;
+  ctx.translate(cam.tx, cam.ty); ctx.scale(cam.z, cam.z);
   if (anim) {
     anim.t += dt;
     const half = anim.dur / 2;
@@ -824,8 +897,16 @@ function frame(now) {
   ctx.setTransform(dpr * scale, 0, 0, dpr * scale, 0, 0);
   drawAtmosphere();
   if (black > 0) { ctx.fillStyle = `rgba(3,2,3,${black})`; ctx.fillRect(0, TOP, W, BOT - TOP); }
+  // The zoom chip.
+  if (cam.z > 1.04 && !anim) {
+    const c = ZOOM_CHIP;
+    ctx.fillStyle = 'rgba(8,6,7,.75)'; rrect(c[0], c[1], c[2], c[3], 13); ctx.fill();
+    ctx.strokeStyle = 'rgba(201,164,99,.5)'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = '#ead6b0'; ctx.font = '600 12px system-ui, sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('\u21BA ' + cam.z.toFixed(1) + 'x', c[0] + c[2] / 2, c[1] + 17.5);
+  }
   // The study banner.
-  if (state === 'hall' && hall === 0 && !anim) {
+  if (state === 'hall' && hall === 0 && !anim && cam.z < 1.04) {
     ctx.fillStyle = 'rgba(8,6,7,.72)'; rrect(40, TOP + 12, 280, 30, 15); ctx.fill();
     ctx.strokeStyle = 'rgba(201,164,99,.4)'; ctx.lineWidth = 1; ctx.stroke();
     ctx.fillStyle = '#ead6b0'; ctx.font = '12.5px system-ui, sans-serif'; ctx.textAlign = 'center';
@@ -836,9 +917,10 @@ function frame(now) {
     const a = Math.min(1, revealT * 2.5);
     if (wasWrongType === 'missed' && mark) {
       ctx.fillStyle = `rgba(0,0,0,${.6 * a})`;
-      ctx.beginPath(); ctx.rect(0, TOP, W, BOT - TOP); ctx.arc(mark.x, mark.y, mark.r, 0, Math.PI * 2, true); ctx.fill();
+      const [mx, my] = toScreen(mark.x, mark.y), mr = mark.r * cam.z;
+      ctx.beginPath(); ctx.rect(0, TOP, W, BOT - TOP); ctx.arc(mx, my, mr, 0, Math.PI * 2, true); ctx.fill();
       const pulse = 1 + Math.sin(revealT * 5) * .04;
-      ctx.strokeStyle = `rgba(240,100,86,${a})`; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(mark.x, mark.y, mark.r * pulse, 0, 7); ctx.stroke();
+      ctx.strokeStyle = `rgba(240,100,86,${a})`; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(mx, my, mr * pulse, 0, 7); ctx.stroke();
       ctx.strokeStyle = `rgba(240,100,86,${.3 * a})`; ctx.lineWidth = 7; ctx.stroke();
     } else {
       ctx.fillStyle = `rgba(0,0,0,${.35 * a})`; ctx.fillRect(0, TOP, W, BOT - TOP);
@@ -851,7 +933,8 @@ function frame(now) {
   if (state === 'intro') card('Deja View', [
     'You are lost in a hotel hallway that keeps coming back.',
     'If anything is different, turn back. If nothing is different, go on.',
-    'Six right calls in a row lead you out. One wrong call sends you back to the start.'], 'Enter', 'draft 1  ·  sound on for the mood');
+    'Six right calls in a row lead you out. One wrong call sends you back to the start.',
+    'Pinch, double-tap, or scroll to look closer.'], 'Enter', 'draft 1  ·  sound on for the mood');
   if (state === 'win') {
     const secs = Math.round((stats.t1 - stats.t0) / 1000);
     card('You got out', [`Hallways walked: ${stats.halls}`, `Wrong turns: ${stats.wrong}`, `Time: ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`], 'Play again', 'the hallway will be waiting');
@@ -865,8 +948,10 @@ const Q = new URLSearchParams(location.search);
 if (Q.get('a')) { state = 'hall'; hall = 3; makeHall(3, Q.get('a')); }
 if (Q.get('study') !== null && Q.get('study') !== undefined && Q.has && Q.has('study')) { state = 'hall'; hall = 0; makeHall(0); }
 if (Q.get('reveal')) { state = 'reveal'; hall = 3; makeHall(3, Q.get('reveal')); wasWrongType = 'missed'; revealT = 2; }
+if (Q.get('reveal') && mark) { focusOn(mark.x, mark.y, mark.r > 70 ? 1.3 : 1.8); Object.assign(cam, camTo); }
+if (Q.get('zoom')) { const [zz, zx, zy] = Q.get('zoom').split(',').map(Number); focusOn(zx, zy, zz); Object.assign(cam, camTo); }
 if (Q.has && Q.has('win')) { state = 'win'; stats = { halls: 11, wrong: 2, t0: 0, t1: 134000 }; }
-window.__dv = { baseScene, ANOMALIES, drawScene, makeHall, decide, get state() { return state; }, get hall() { return hall; }, get anomaly() { return anomaly; }, startRun, startOver, setRnd: f => rnd = f };
+window.__dv = { cam, camTo, zoomAt, resetCam,  baseScene, ANOMALIES, drawScene, makeHall, decide, get state() { return state; }, get hall() { return hall; }, get anomaly() { return anomaly; }, startRun, startOver, setRnd: f => rnd = f };
 requestAnimationFrame(frame);
 </script>
 </body>
