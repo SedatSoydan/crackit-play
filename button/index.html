@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="robots" content="noindex, nofollow">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Button Bot draft 6</title>
+<title>Button Bot draft 7</title>
 <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
   :root { --bg: #0e1024; --text: #f4f1ec; --muted: #9ba3be; }
@@ -24,12 +24,12 @@
 <body>
 <main>
   <div class="intro">
-    <h1>Button Bot · taslak 6</h1>
+    <h1>Button Bot · taslak 7</h1>
     <ul>
       <li>İki tuş: <b>KIRMIZI</b> ve <b>MAVİ</b>. Klavyede sol tuş <b>A</b> ya da ←, sağ tuş <b>D</b> ya da →. Her kartta tek tuşa basılır; iki tuşa aynı anda basmak gerekmez.</li>
       <li><b>TAP</b> = kısa dokun, <b>HOLD</b> = basılı tut (tuşun etrafındaki halka dolunca basılı tutma sayılır). Kart hangisini diyorsa o; yanlış türde basmak da hatadır.</li>
       <li>Her tur süre bitene kadar sürer; doğru yaptın mı söylenmez. Görevi bitirdikten sonra bir daha basarsan o da yanlış sayılır.</li>
-      <li><b>Tek yanlışta oyun biter</b> ve nedeni yazılır. Tur 1–5 temel, 6–15 tuzaklar, 16 ve sonrası hafıza, tuş değişimi, son saniye, ⭐ kuralı.</li>
+      <li><b>Tek yanlışta oyun biter</b>, ama yanlış da doğru da <b>süre bitince</b> belli olur; o zaman nedeni yazılır. Tur 1–5 temel, 6–15 tuzaklar, 16 ve sonrası hafıza, tuş değişimi, son saniye, ⭐ kuralı.</li>
     </ul>
   </div>
   <div class="phone"><canvas id="board" width="360" height="640"></canvas></div>
@@ -151,7 +151,7 @@
   function start() { game.phase = "play"; nextRound(); }
   function swapSlots() { game.slots = game.slots.slice().reverse(); }
   function tierOf(round) { return round <= 5 ? 1 : round <= 15 ? 2 : 3; }
-  function baseTime(round) { const tier = tierOf(round); return tier === 1 ? 5.5 : tier === 2 ? 5.0 : Math.max(3.4, 4.6 - (round - 16) * 0.05); }
+  function baseTime(round) { const tier = tierOf(round); return tier === 1 ? 6.5 : tier === 2 ? 6.0 : Math.max(4.2, 5.4 - (round - 16) * 0.05); }
 
   function nextRound() {
     game.round++;
@@ -179,16 +179,19 @@
   function resolve(result) {
     if (!result || result === "CONTINUE" || game.phase !== "play") return;
     if (result === "PASS") { game.s.done = true; return; }
-    gameOver(result.slice(5));
+    markFail(result.slice(5));
   }
+  // The first mistake of a round is kept and shown only when the round's time runs out.
+  function markFail(why) { if (!game.s.failed) game.s.failed = why; }
   // A measured press reaches the rule: first the TAP/HOLD check, then the rule itself.
   function measured(key, kind) {
     const s = game.s, inst = game.inst;
     s.pending[key] = false;
     s.count[key]++; s.seq.push(key); s.kinds.push(kind);
-    if (s.done) { gameOver(`${kind === "hold" ? "Held" : "Tapped"} ${N(key)} after the task was done`); return; }
-    if (inst.wants === "tap" && kind === "hold") { gameOver(`Held ${N(key)}: the card said TAP`); return; }
-    if (inst.wants === "hold" && kind === "tap") { gameOver(`Tapped ${N(key)}: the card said HOLD`); return; }
+    if (s.failed) return;
+    if (s.done) { markFail(`${kind === "hold" ? "Held" : "Tapped"} ${N(key)} after the task was done`); return; }
+    if (inst.wants === "tap" && kind === "hold") { markFail(`Held ${N(key)}: the card said TAP`); return; }
+    if (inst.wants === "hold" && kind === "tap") { markFail(`Tapped ${N(key)}: the card said HOLD`); return; }
     resolve(inst.onPress(key, s, kind));
   }
   function roundPassed() {
@@ -219,8 +222,8 @@
     const s = game.s;
     s.raw[key] = true; s.pending[key] = true; s.downAt[key] = s.elapsed;
     // A press on a "press nothing" card, or after the task is done, is wrong at once.
-    if (game.inst.none) { gameOver(game.inst.id === "starRule" ? "Nothing to press yet" : "You pressed a button"); return; }
-    if (s.done) { gameOver(`Pressed ${N(key)} after the task was done`); return; }
+    if (game.inst.none) { markFail(game.inst.id === "starRule" ? "Nothing to press yet" : "You pressed a button"); return; }
+    if (s.done) { markFail(`Pressed ${N(key)} after the task was done`); return; }
   }
   function release(key) {
     if (!game.pressed[key]) return;
@@ -229,7 +232,7 @@
     const s = game.s;
     s.raw[key] = false;
     if (s.pending[key]) measured(key, "tap");
-    if (game.phase === "play" && !s.done && game.inst.onRelease) resolve(game.inst.onRelease(key, s));
+    if (game.phase === "play" && !s.done && !s.failed && game.inst.onRelease) resolve(game.inst.onRelease(key, s));
   }
   function keyAt(x, y) { for (let i = 0; i < 2; i++) if (Math.hypot(x - SLOT_X[i], y - BTN_Y) < BTN_R + 14) return game.slots[i]; return null; }
   const pointers = {};
@@ -273,13 +276,13 @@
       if (s.left < 1.2) { game.beat -= dt; if (game.beat <= 0) { sound("beat"); game.beat = 0.45; } }
       // A press kept down for HOLD seconds becomes a HOLD.
       for (const k of KEYS) if (game.phase === "play" && s.pending[k] && s.elapsed - s.downAt[k] >= HOLD) { sound("hold"); measured(k, "hold"); }
-      if (game.phase === "play" && !s.done && inst.onTick) resolve(inst.onTick(s));
+      if (game.phase === "play" && !s.done && !s.failed && inst.onTick) resolve(inst.onTick(s));
       if (game.phase === "play" && s.left <= 0) {
         // A press still down when the time runs out counts as a tap.
         for (const k of KEYS) if (game.phase === "play" && s.pending[k]) measured(k, "tap");
-        if (game.phase !== "play") return;
+        if (s.failed) { gameOver(s.failed); return; }
         if (s.done) roundPassed();
-        else { const r = inst.onTimeout(s); if (r === "PASS") roundPassed(); else resolve(r); }
+        else { const r = inst.onTimeout(s); if (r === "PASS") roundPassed(); else gameOver(r.slice(5)); }
       }
     } else if (game.phase === "over") game.overWait -= dt;
   }
@@ -455,11 +458,12 @@
     c.lineWidth = 2; c.strokeStyle = "rgba(190,180,255,0.35)"; c.stroke();
     c.textAlign = "center"; c.font = "700 38px Fredoka, sans-serif";
     c.fillStyle = titleColor; c.shadowColor = titleColor; c.shadowBlur = 20; c.fillText(title, 180, 226); c.shadowBlur = 0;
-    let y = 266;
+    let y = 244;
     for (const [text, font, color] of lines) {
       c.font = font; c.fillStyle = color;
+      const size = parseInt(font.split(" ")[1], 10);
       const rows = [""]; for (const wd of text.split(" ")) { const tryRow = rows[rows.length - 1] ? rows[rows.length - 1] + " " + wd : wd; if (c.measureText(tryRow).width > 260) rows.push(wd); else rows[rows.length - 1] = tryRow; }
-      for (const row of rows) { c.fillText(row, 180, y); y += parseInt(font.split(" ")[1], 10) + 8; }
+      for (const row of rows) { y += size; c.fillText(row, 180, y); y += 8; }
     }
     if (sub) { c.font = "700 17px Fredoka, sans-serif"; c.fillStyle = `rgba(255,210,63,${0.6 + Math.sin(t * 4) * 0.4})`; c.fillText(sub, 180, 430); }
   }
