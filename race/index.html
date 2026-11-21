@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex, nofollow">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Race game themes</title>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #14172b; --text: #f4f1ec; --muted: #9ba3be; --accent: #ffb23e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 1240px; margin: 0 auto; padding: 28px 16px 60px; }
+  .intro { max-width: 660px; margin: 0 auto 28px; }
+  .intro h1 { margin: 0 0 6px; font-size: 26px; }
+  .intro p { color: var(--muted); margin: 0 0 10px; }
+  .grid { display: flex; flex-wrap: wrap; gap: 36px 28px; justify-content: center; }
+  figure { margin: 0; width: 360px; max-width: 100%; }
+  figcaption b { display: block; font-size: 20px; color: var(--accent); }
+  figcaption span { color: var(--muted); font-size: 15px; display: block; margin-bottom: 4px; }
+  figcaption ul { color: var(--muted); font-size: 14px; margin: 4px 0 12px; padding-left: 18px; }
+  .phone { width: 360px; max-width: 100%; border-radius: 30px; overflow: hidden; box-shadow: 0 0 0 8px #000; touch-action: manipulation; user-select: none; }
+  canvas { display: block; width: 100%; height: auto; cursor: pointer; }
+  .tip { text-align: center; color: var(--muted); font-size: 14px; margin-top: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="intro">
+    <h1>1C.1 yarış oyunu: tema taslakları</h1>
+    <p>Beş yarışçı kendi şeritlerinde yarışır, birbirini geçer, şeritlerindeki yıldızları toplar. Üstte bir talimat çıkar: <b>sıra</b> ("lidere dokun"), <b>değişim</b> ("az önce sollayana dokun") ya da <b>sayı</b> ("en çok yıldızı olana dokun"). 3 saniye içinde o yarışçının şeridine dokun.</p>
+    <p>60 saniye; art arda doğrular puanı katlar. Başlamak için ekrana dokun. Taslakta seviye yok, üç talimat türü karışık gelir.</p>
+  </div>
+
+  <div class="grid">
+    <figure>
+      <figcaption><b>A · Comet Cup</b><span>Gece gökyüzünde parlak kuyruklu yıldızlar. Videoya en yakın his.</span>
+        <ul><li>Lacivert uzay, parıldayan kuyruklar</li><li>Ses: vınlama, doğruda çan</li></ul></figcaption>
+      <div class="phone"><canvas data-theme="comets" width="360" height="640"></canvas></div>
+    </figure>
+    <figure>
+      <figcaption><b>B · Kite Derby</b><span>Rüzgârlı bir gökyüzünde kurdeleli uçurtmalar yarışır.</span>
+        <ul><li>Açık mavi gök, bulutlar, dalgalanan kurdeleler</li><li>Ses: rüzgâr, doğruda zil</li></ul></figcaption>
+      <div class="phone"><canvas data-theme="kites" width="360" height="640"></canvas></div>
+    </figure>
+    <figure>
+      <figcaption><b>C · Regatta</b><span>Yelkenliler denizde, şamandıralar arasında yarışır; köpüklü izler bırakır.</span>
+        <ul><li>Turkuaz deniz, beyaz izler, renkli yelkenler</li><li>Ses: dalga, doğruda düdük</li></ul></figcaption>
+      <div class="phone"><canvas data-theme="boats" width="360" height="640"></canvas></div>
+    </figure>
+  </div>
+  <p class="tip">Yarışçının üstündeki sayı topladığı yıldızlar. Sıra numarası gösterilmez; sırayı okumak oyunun kendisi.</p>
+</main>
+
+<script>
+(() => {
+  const W = 360, H = 640, TAU = Math.PI * 2;
+  const ROUND = 60, WINDOW = 3.0, PAUSE = 0.8;
+  const LANE_TOP = 210, LANE_H = 78, LANES = 5;
+  const COLORS = ["#ff4d5e", "#3b8bff", "#ffc21a", "#22c55e", "#a066ff"];
+  const NAMES = ["red", "blue", "yellow", "green", "purple"];
+  const SHAPES = ["star", "heart", "diamond", "circle", "triangle"];
+  const PLACES = ["leader", "2nd place", "3rd place", "4th place", "last one"];
+
+  function dot(c, x, y, r, f) { c.beginPath(); c.arc(x, y, r, 0, TAU); c.fillStyle = f; c.fill(); }
+  function rr(c, x, y, w, h, r) { c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); }
+  function lin(c, x0, y0, x1, y1, st) { const g = c.createLinearGradient(x0, y0, x1, y1); st.forEach(([o, col]) => g.addColorStop(o, col)); return g; }
+  function shape(c, kind, x, y, r, fill, line) {
+    c.beginPath();
+    if (kind === "star") { for (let i = 0; i < 10; i++) { const rad = i % 2 ? r * 0.45 : r, a = -Math.PI / 2 + i * Math.PI / 5; c.lineTo(x + Math.cos(a) * rad, y + Math.sin(a) * rad); } }
+    else if (kind === "heart") { for (let i = 0; i < 40; i++) { const t = i * TAU / 40; c.lineTo(x + 16 * Math.pow(Math.sin(t), 3) * r / 17, y - (13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t)) * r / 17 + r * 0.1); } }
+    else if (kind === "diamond") { c.moveTo(x, y - r); c.lineTo(x + r * 0.75, y); c.lineTo(x, y + r); c.lineTo(x - r * 0.75, y); }
+    else if (kind === "circle") { c.arc(x, y, r * 0.85, 0, TAU); }
+    else { for (let i = 0; i < 3; i++) { const a = -Math.PI / 2 + i * TAU / 3; c.lineTo(x + Math.cos(a) * r, y + r * 0.15 + Math.sin(a) * r); } }
+    c.closePath(); c.fillStyle = fill; c.fill();
+    if (line) { c.lineWidth = 2.5; c.strokeStyle = line; c.stroke(); }
+  }
+  function badge(c, x, y, n, ink, back) {
+    rr(c, x - 13, y - 11, 26, 22, 11); c.fillStyle = back; c.fill();
+    c.fillStyle = ink; c.font = "700 15px Fredoka, sans-serif"; c.textAlign = "center"; c.fillText(n, x, y + 5);
+  }
+
+  const THEMES = {
+    comets: {
+      ink: "#fff4d6", muted: "#b9c2e8", card: "rgba(255,255,255,0.1)", lane: "rgba(255,255,255,0.05)", pickup: "#ffe36e",
+      bg(c, t, stars) {
+        c.fillStyle = lin(c, 0, 0, 0, H, [[0, "#0f1640"], [1, "#1c1250"]]); c.fillRect(0, 0, W, H);
+        for (const s of stars) { const x = ((s.x - t * s.v * 30) % W + W) % W; dot(c, x, s.y, s.r, `rgba(255,255,255,${0.3 + 0.4 * Math.sin(t * 2 + s.x)})`); }
+      },
+      racer(c, r, x, y, t) {
+        const g = c.createLinearGradient(x - 150, 0, x, 0);
+        g.addColorStop(0, "rgba(255,255,255,0)"); g.addColorStop(0.7, r.color + "88"); g.addColorStop(1, "#ffffffcc");
+        c.beginPath(); c.moveTo(x - 160, y); c.quadraticCurveTo(x - 60, y - 22, x, y - 15); c.lineTo(x, y + 15); c.quadraticCurveTo(x - 60, y + 22, x - 160, y); c.fillStyle = g; c.fill();
+        for (let i = 0; i < 4; i++) dot(c, x - 30 - i * 26 + Math.sin(t * 9 + i) * 3, y + Math.sin(t * 7 + i * 2) * 8, 2, "rgba(255,255,255,0.7)");
+        dot(c, x, y, 22, r.color + "55");
+        shape(c, r.shape, x, y, 19, r.color, "#ffffff");
+      },
+      pick(c, x, y, t) { shape(c, "star", x, y, 9, "#ffe36e", "#c48a1a"); },
+    },
+    kites: {
+      ink: "#123a5a", muted: "#3f6f8f", card: "rgba(255,255,255,0.7)", lane: "rgba(255,255,255,0.25)", pickup: "#ffb000",
+      bg(c, t, stars) {
+        c.fillStyle = lin(c, 0, 0, 0, H, [[0, "#7cc8f5"], [1, "#d9f1ff"]]); c.fillRect(0, 0, W, H);
+        for (let i = 0; i < 6; i++) {
+          const x = ((i * 97 - t * (10 + i * 3)) % (W + 120) + W + 120) % (W + 120) - 60, y = 40 + (i * 113) % 560;
+          c.fillStyle = "rgba(255,255,255,0.8)"; c.beginPath(); c.ellipse(x, y, 34, 11, 0, 0, TAU); c.ellipse(x + 14, y - 8, 18, 10, 0, 0, TAU); c.fill();
+        }
+      },
+      racer(c, r, x, y, t) {
+        c.strokeStyle = r.color; c.lineWidth = 4; c.beginPath();
+        for (let i = 0; i <= 30; i++) { const xx = x - 18 - i * 5; c.lineTo(xx, y + 14 + Math.sin(t * 6 - i * 0.5) * (2 + i * 0.3)); }
+        c.stroke();
+        for (let i = 1; i < 5; i++) { const xx = x - 18 - i * 30, yy = y + 14 + Math.sin(t * 6 - i * 3) * (2 + i * 1.8); c.beginPath(); c.moveTo(xx, yy); c.lineTo(xx - 6, yy - 6); c.lineTo(xx - 6, yy + 6); c.closePath(); c.fillStyle = "#ffffff"; c.fill(); }
+        c.beginPath(); c.moveTo(x, y - 24); c.lineTo(x + 18, y); c.lineTo(x, y + 24); c.lineTo(x - 18, y); c.closePath(); c.fillStyle = r.color; c.fill(); c.strokeStyle = "#ffffff"; c.lineWidth = 2.5; c.stroke();
+        c.beginPath(); c.moveTo(x, y - 24); c.lineTo(x, y + 24); c.moveTo(x - 18, y); c.lineTo(x + 18, y); c.strokeStyle = "rgba(255,255,255,0.6)"; c.lineWidth = 1.5; c.stroke();
+        shape(c, r.shape, x, y, 8, "#ffffff");
+      },
+      pick(c, x, y) { shape(c, "star", x, y, 9, "#ffb000", "#ffffff"); },
+    },
+    boats: {
+      ink: "#0c3a44", muted: "#2f6f78", card: "rgba(255,255,255,0.7)", lane: "rgba(255,255,255,0.12)", pickup: "#ffd23f",
+      bg(c, t) {
+        c.fillStyle = lin(c, 0, 0, 0, H, [[0, "#1fb0c6"], [1, "#0e7a9a"]]); c.fillRect(0, 0, W, H);
+        c.strokeStyle = "rgba(255,255,255,0.22)"; c.lineWidth = 2;
+        for (let y = 20; y < H; y += 34) { c.beginPath(); for (let x = -20; x < W + 20; x += 10) c.lineTo(x, y + Math.sin(x * 0.05 + t * 2 + y) * 3); c.stroke(); }
+      },
+      racer(c, r, x, y, t) {
+        const bob = Math.sin(t * 3 + y) * 2;
+        c.fillStyle = "rgba(255,255,255,0.55)";
+        c.beginPath(); c.moveTo(x - 20, y + 10 + bob); c.lineTo(x - 140, y + 2); c.lineTo(x - 140, y + 20); c.closePath(); c.fill();
+        for (let i = 0; i < 5; i++) dot(c, x - 40 - i * 22, y + 11 + Math.sin(t * 8 + i) * 4, 2.5, "#ffffff");
+        c.beginPath(); c.moveTo(x - 24, y + 6 + bob); c.lineTo(x + 20, y + 6 + bob); c.lineTo(x + 12, y + 18 + bob); c.lineTo(x - 18, y + 18 + bob); c.closePath(); c.fillStyle = "#6b3f22"; c.fill();
+        c.beginPath(); c.moveTo(x - 2, y + 4 + bob); c.lineTo(x - 2, y - 26 + bob); c.lineTo(x + 18, y + 2 + bob); c.closePath(); c.fillStyle = r.color; c.fill(); c.strokeStyle = "#ffffff"; c.lineWidth = 2; c.stroke();
+        c.beginPath(); c.moveTo(x - 5, y + 4 + bob); c.lineTo(x - 5, y - 20 + bob); c.lineTo(x - 22, y + 2 + bob); c.closePath(); c.fillStyle = "#ffffff"; c.fill();
+        shape(c, r.shape, x + 5, y - 6 + bob, 6, "#ffffff");
+      },
+      pick(c, x, y, t) { dot(c, x, y + Math.sin(t * 3) * 2, 8, "#ff6b4a"); dot(c, x, y + Math.sin(t * 3) * 2, 4, "#ffd23f"); },
+    },
+  };
+
+  let active = null;
+  function game(canvas) {
+    const theme = THEMES[canvas.dataset.theme];
+    const c = canvas.getContext("2d");
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    const stars = Array.from({ length: 60 }, (_, i) => ({ x: (i * 97) % W, y: (i * 61) % H, r: 0.6 + (i % 3) * 0.5, v: 0.3 + (i % 4) * 0.2 }));
+    let racers, pickups, time, score, streak, right, wrong, started, over, ask, pause, flash, t = 0, last = performance.now();
+    let order = [], history = [], lastOvertake = null;
+
+    function reset() {
+      racers = COLORS.map((color, i) => ({ i, color, name: NAMES[i], shape: SHAPES[i], p: 40 - i * 6 + Math.random() * 4, v: 60, target: 60, retarget: Math.random() * 2, count: 0 }));
+      pickups = []; time = ROUND; score = 0; streak = 0; right = 0; wrong = 0; started = false; over = false; ask = null; pause = 1.0; flash = null;
+      order = rank(); history = []; lastOvertake = null;
+    }
+    const rank = () => racers.slice().sort((a, b) => b.p - a.p).map((r) => r.i);
+    const mean = () => racers.reduce((s, r) => s + r.p, 0) / racers.length;
+    const mult = () => Math.min(1 + Math.floor(streak / 4), 5);
+    const screenX = (p) => Math.max(70, Math.min(320, 196 + (p - mean()) * 2.2));
+    const laneY = (i) => LANE_TOP + i * LANE_H + LANE_H / 2;
+
+    function newAsk() {
+      const kinds = ["rank", "rank", "count"];
+      if (lastOvertake && t - lastOvertake.t < 0.8) kinds.push("change", "change", "change");
+      const kind = kinds[Math.floor(Math.random() * kinds.length)];
+      if (kind === "change") {
+        const up = Math.random() < 0.65;
+        const who = up ? lastOvertake.up : lastOvertake.down;
+        lastOvertake = null;
+        return { kind, text: up ? "Tap the one that just overtook" : "Tap the one that just dropped back", answer: () => [who], left: WINDOW };
+      }
+      if (kind === "count") {
+        const counts = racers.map((r) => r.count);
+        const top = Math.max(...counts);
+        if (top > 0 && counts.filter((n) => n === top).length === 1 && Math.random() < 0.6) {
+          return { kind, text: "Tap the one with the most stars", answer: () => { const cs = racers.map((r) => r.count); const m = Math.max(...cs); return racers.filter((r) => r.count === m).map((r) => r.i); }, left: WINDOW };
+        }
+        const unique = [...new Set(counts)].filter((n) => counts.filter((m) => m === n).length === 1);
+        if (unique.length) {
+          const n = unique[Math.floor(Math.random() * unique.length)];
+          return { kind, text: `Tap the one with ${n} star${n === 1 ? "" : "s"}`, answer: () => racers.filter((r) => r.count === n).map((r) => r.i), left: WINDOW };
+        }
+      }
+      const place = [0, 0, 1, 2, 4][Math.floor(Math.random() * 5)];
+      return { kind: "rank", text: `Tap the ${PLACES[place]}`, answer: () => { const now = [rank()[place]]; const before = history.length ? [history[0].order[place]] : []; return now.concat(before); }, left: WINDOW };
+    }
+
+    function answer(lane) {
+      if (over) { reset(); return; }
+      if (!started) { started = true; return; }
+      if (!ask) return;
+      const ok = ask.answer().includes(lane);
+      if (ok) { streak++; right++; score += 10 * mult(); } else { streak = 0; wrong++; }
+      flash = { lane, ok, life: 0.6 };
+      ask = null; pause = PAUSE;
+    }
+    canvas.addEventListener("pointerdown", (ev) => {
+      active = canvas;
+      const r = canvas.getBoundingClientRect();
+      const y = (ev.clientY - r.top) * H / r.height;
+      const lane = Math.floor((y - LANE_TOP) / LANE_H);
+      if (!started || over) { answer(-1); return; }
+      if (lane >= 0 && lane < LANES) answer(lane);
+    });
+    reset();
+
+    function step(dt) {
+      for (const r of racers) {
+        r.retarget -= dt;
+        if (r.retarget <= 0) { r.retarget = 1.2 + Math.random() * 1.8; r.target = 46 + Math.random() * 30; }
+        // Rubber band: far ahead slows, far behind speeds up, so the pack stays close.
+        const pull = (mean() - r.p) * 0.6;
+        r.v += (r.target + pull - r.v) * dt * 1.5;
+        r.p += r.v * dt * 0.5;
+      }
+      const now = rank();
+      history.unshift({ t, order: now.slice() }); while (history.length && t - history[history.length - 1].t > 0.35) history.pop();
+      for (let k = 0; k < now.length; k++) if (now[k] !== order[k]) {
+        const mover = now.find((id, idx) => order.indexOf(id) > idx);
+        const loser = now.find((id, idx) => order.indexOf(id) < idx);
+        if (mover !== undefined && loser !== undefined) lastOvertake = { up: mover, down: loser, t };
+        break;
+      }
+      order = now;
+      // Pickups ahead of the pack; a racer collects the one in its lane.
+      if (Math.random() < dt * 0.9 && pickups.length < 4) pickups.push({ lane: Math.floor(Math.random() * LANES), p: mean() + 70 + Math.random() * 30 });
+      for (const k of pickups) { const r = racers[k.lane]; if (!k.taken && r.p >= k.p) { k.taken = true; r.count++; r.pop = 0.5; } }
+      pickups = pickups.filter((k) => !k.taken && k.p > mean() - 120);
+      for (const r of racers) if (r.pop) r.pop = Math.max(0, r.pop - dt);
+      if (started && !over) {
+        time -= dt; if (time <= 0) { time = 0; over = true; ask = null; }
+        if (ask) { ask.left -= dt; if (ask.left <= 0) { streak = 0; wrong++; flash = { lane: -1, ok: false, life: 0.6 }; ask = null; pause = PAUSE; } }
+        else if (!over) { pause -= dt; if (pause <= 0) ask = newAsk(); }
+      }
+      if (flash) { flash.life -= dt; if (flash.life <= 0) flash = null; }
+    }
+
+    function draw() {
+      c.setTransform(dpr, 0, 0, dpr, 0, 0);
+      theme.bg(c, t, stars);
+      // HUD.
+      rr(c, 16, 16, 328, 40, 20); c.fillStyle = theme.card; c.fill();
+      c.fillStyle = theme.ink; c.font = "700 18px Fredoka, sans-serif"; c.textAlign = "left"; c.fillText(`${Math.ceil(time)}s`, 32, 42);
+      c.textAlign = "center"; c.fillText(`×${mult()}`, 180, 42); c.textAlign = "right"; c.fillText(score, 328, 42);
+      // Instruction card with its window bar.
+      rr(c, 16, 70, 328, 118, 22); c.fillStyle = theme.card; c.fill();
+      c.textAlign = "center"; c.fillStyle = theme.ink;
+      if (over) { c.font = "700 22px Fredoka, sans-serif"; c.fillText("Race over!", 180, 116); c.font = "600 16px Fredoka, sans-serif"; c.fillText(`${right} right · ${wrong} wrong · tap to race again`, 180, 146); }
+      else if (!started) { c.font = "700 22px Fredoka, sans-serif"; c.fillText("Tap to start", 180, 116); c.font = "600 15px Fredoka, sans-serif"; c.fillText("then tap the lane of the racer asked for", 180, 144); }
+      else if (ask) {
+        c.font = "700 21px Fredoka, sans-serif"; c.fillText(ask.text, 180, 124);
+        rr(c, 40, 160, 280, 10, 5); c.fillStyle = "rgba(127,127,127,0.25)"; c.fill();
+        rr(c, 40, 160, 280 * Math.max(0, ask.left / WINDOW), 10, 5); c.fillStyle = ask.left < 1 ? "#ff6b6b" : "#3fd17f"; c.fill();
+      } else { c.font = "600 17px Fredoka, sans-serif"; c.fillStyle = theme.muted; c.fillText("Watch the race...", 180, 132); }
+      // Lanes.
+      for (let i = 0; i < LANES; i++) { if (i % 2 === 0) { c.fillStyle = theme.lane; c.fillRect(0, LANE_TOP + i * LANE_H, W, LANE_H); } }
+      for (const k of pickups) theme.pick(c, screenX(k.p), laneY(k.lane), t);
+      for (const r of racers) {
+        const x = screenX(r.p), y = laneY(r.i);
+        if (flash && flash.lane === r.i) { c.fillStyle = flash.ok ? "rgba(63,209,127,0.3)" : "rgba(255,107,107,0.3)"; c.fillRect(0, LANE_TOP + r.i * LANE_H, W, LANE_H); }
+        theme.racer(c, r, x, y, t);
+        const s = 1 + (r.pop || 0) * 0.8;
+        c.save(); c.translate(x + 30, y - 18); c.scale(s, s); badge(c, 0, 0, r.count, "#1a1a2e", "#ffffff"); c.restore();
+      }
+      if (flash) {
+        c.globalAlpha = Math.min(1, flash.life * 2);
+        c.font = "700 40px Fredoka, sans-serif"; c.textAlign = "center"; c.fillStyle = flash.ok ? "#3fd17f" : "#ff6b6b";
+        c.fillText(flash.ok ? "✓" : "✗", 330, 200);
+        c.globalAlpha = 1;
+      }
+    }
+    function frame(now) {
+      const dt = Math.min(0.05, (now - last) / 1000); last = now; t += dt;
+      step(dt); draw(); requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  }
+  document.querySelectorAll("canvas[data-theme]").forEach(game);
+})();
+</script>
+</body>
+</html>
