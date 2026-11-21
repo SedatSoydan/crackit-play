@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="robots" content="noindex, nofollow">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Button Bot draft 2</title>
+<title>Button Bot draft 3</title>
 <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
-  :root { --bg: #14172b; --text: #f4f1ec; --muted: #9ba3be; }
+  :root { --bg: #0e1024; --text: #f4f1ec; --muted: #9ba3be; }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, sans-serif; }
   main { max-width: 900px; margin: 0 auto; padding: 20px 12px 40px; }
@@ -19,280 +19,428 @@
   canvas { display: block; width: 100%; height: auto; }
   .row { display: flex; gap: 10px; justify-content: center; margin-top: 14px; flex-wrap: wrap; align-items: center; }
   button { font: 600 16px Fredoka, sans-serif; border: 0; border-radius: 14px; padding: 8px 16px; background: #2b3157; color: var(--text); cursor: pointer; }
-  .seed { color: var(--muted); font-size: 13px; }
 </style>
 </head>
 <body>
 <main>
   <div class="intro">
-    <h1>Button Bot · taslak 2</h1>
+    <h1>Button Bot · taslak 3</h1>
     <ul>
-      <li>Robot her kartta tek bir talimat verir. Talimata göre <b>KIRMIZI</b> ya da <b>MAVİ</b> tuşa bas (ya da basma!). Klavyede 1 ve 2.</li>
-      <li>Doğru yapınca kart hemen biter; yanlış tuşa basınca da biter. “Hiçbir şeye basma” kartında süre bitince doğru sayılır.</li>
-      <li>Taslak 2: iki tuş ve daha uzun süreler. Yeni türler kart kart açılır: yasaklar, sıralar, sayma, basılı tutma, hafıza, kalıcı kural (⭐), boya tuzağı, tuşların yer değiştirmesi. 3 can.</li>
-      <li>Her açılış farklı başlar. Aynı oyunu tekrar oynamak için alttaki tohum numarasını not et.</li>
+      <li>İki tuş: <b>KIRMIZI</b> ve <b>MAVİ</b>. Klavyede sol tuş <b>A</b> ya da ←, sağ tuş <b>D</b> ya da →. Telefonda iki tuşa aynı anda basılabilir.</li>
+      <li>Her turda robot bir talimat verir. Doğruysa tur hemen biter. “Tam 3 kez” ya da “hiçbir şeye basma” gibi kartlar süre bitince geçer; fazla basarsan hemen kaybedersin.</li>
+      <li>Tur 1–5 temel kurallar, 6–15 tuzaklar (renk tuzağı, sıra, basılı tutma, sayma, matematik), 16 ve sonrası hafıza, tuş değişimi, bas-tut-dokun, son saniye. 3 can; yanlışta nedeni yazılır.</li>
     </ul>
   </div>
   <div class="phone"><canvas id="board" width="360" height="640"></canvas></div>
-  <div class="row"><button id="restart">Yeni oyun</button><button id="jump">Kart 10'dan başla</button><span class="seed" id="seed"></span></div>
+  <div class="row"><button id="restart">Yeni oyun</button><button id="jump6">Tur 6'dan</button><button id="jump16">Tur 16'dan</button><button id="mute">Ses: açık</button></div>
 </main>
 <script>
 (() => {
   const W = 360, H = 640, TAU = Math.PI * 2;
+  // --- Colours ------------------------------------------------------------------------------
   const COLORS = {
-    R: { name: "RED", face: "#ef4444", low: "#b91c1c", edge: "#7f1d1d", text: "#ff5a5a" },
-    Y: { name: "YELLOW", face: "#facc15", low: "#ca8a04", edge: "#854d0e", text: "#ffd630" },
-    B: { name: "BLUE", face: "#3b82f6", low: "#1d4ed8", edge: "#1e3a8a", text: "#5b9bff" },
+    R: { name: "RED", face: "#ff4d5e", low: "#c81e3a", side: "#8e1028", text: "#ff6b7a", glow: "rgba(255,77,94," },
+    B: { name: "BLUE", face: "#3d8bff", low: "#1f5fd6", side: "#123e96", text: "#6aa8ff", glow: "rgba(61,139,255," },
+    Y: { name: "YELLOW", face: "#ffd23f", text: "#ffd23f" },
+    G: { name: "GREEN", face: "#3ddc84", text: "#4ee59a" },
   };
   const KEYS = ["R", "B"];
-  const SLOT_X = [100, 260], BTN_Y = 546, BTN_R = 58;
-  const WORDS = ["big red dog", "the sun is hot", "cats nap", "I like cake", "go to bed now", "one more", "fish swim fast", "a blue hat", "ducks say quack", "time to play"];
-  const SHAPES = [["triangle", 3], ["square", 4], ["pentagon", 5]];
+  const SLOT_X = [100, 260], BTN_Y = 548, BTN_R = 60;
+  const N = (k) => COLORS[k].name;
+  const other = (k) => (k === "R" ? "B" : "R");
 
-  // --- Seeded random --------------------------------------------------------------------
-  function mulberry(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  // --- Random -------------------------------------------------------------------------------
   let rand = Math.random;
+  function mulberry(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
   const pick = (a) => a[Math.floor(rand() * a.length)];
   const between = (lo, hi) => lo + Math.floor(rand() * (hi - lo + 1));
-  const others = (c) => KEYS.filter((k) => k !== c);
 
-  // --- Card kinds ---------------------------------------------------------------------------
-  // A card: lines (arrays of [text, colour key or null]), an optional visual, the time, and
-  // the answer: {seq:[...]} exact presses, {any:[...]} one press of these, {none:true}, or
-  // {hold: key}. `want` is the short answer shown after a miss.
-  const C = (k) => [COLORS[k].name, k];
+  // --- Prompt tokens: [text, colour key or null, ink override] -------------------------------
   const T = (s) => [s, null];
-  const times = (n) => n === 1 ? "once" : n === 2 ? "twice" : `${n} times`;
-  const KINDS = {
-    simple: { from: 1, make: () => { const c = pick(KEYS); return { lines: [[T("Press "), C(c)]], time: 2.6, seq: [c], want: `${COLORS[c].name}` }; } },
-    times: { from: 2, make: () => { const c = pick(KEYS), n = between(2, 4); return { lines: [[T("Press "), C(c)], [T(times(n))]], time: 3.4, seq: Array(n).fill(c), want: `${COLORS[c].name} ×${n}` }; } },
-    not: { from: 3, make: () => { const c = pick(KEYS); return { lines: [[T("Press the one")], [T("that is NOT "), C(c)]], time: 2.8, any: others(c), want: COLORS[others(c)[0]].name }; } },
-    nothing: { from: 3, make: () => ({ lines: pick([[[T("Don't press")], [T("anything")]], [[T("Hands off!")]], [[T("Wait…")]]]), time: 2.4, none: true, want: "nothing" }) },
-    sequence: { from: 4, make: () => { const n = between(2, 3), s = []; while (s.length < n) { const c = pick(KEYS); if (c !== s[s.length - 1]) s.push(c); } const line = []; s.forEach((c, i) => { if (i) line.push(T(", ")); line.push(C(c)); }); return { lines: [line], small: "in this order", time: 3.6, seq: s, want: s.map((c) => COLORS[c].name).join(", ") }; } },
-    words: { from: 5, make: () => { const c = pick(KEYS), w = pick(WORDS), n = w.split(" ").length; return { lines: [[T("Press "), C(c), T(" once")], [T("per word:")]], quote: `“${w}”`, time: 5, seq: Array(n).fill(c), want: `${COLORS[c].name} ×${n}` }; } },
-    corners: { from: 5, make: () => { const c = pick(KEYS), [shape, n] = pick(SHAPES); return { lines: [[T("Press "), C(c), T(" once")], [T("per corner")]], shape: n, time: 4.4, seq: Array(n).fill(c), want: `${COLORS[c].name} ×${n} (${shape})` }; } },
-    hold: { from: 6, make: () => { const c = pick(KEYS); return { lines: [[T("Hold "), C(c)], [T("until the bar fills")]], time: 3.4, hold: c, holdFor: 1.3, want: `hold ${COLORS[c].name}` }; } },
-    position: { from: 7, make: () => { const i = between(0, 1), word = ["LEFT", "RIGHT"][i]; const c = state.slots[i]; return { lines: [[T("Press the")], [T(word), T(" button")]], time: 2.8, seq: [c], want: `the ${word.toLowerCase()} one (${COLORS[c].name})` }; } },
-    rememberColor: { from: 7, ok: () => !state.memColor, make: () => { const c = pick(KEYS); state.memColor = c; return { lines: [[T("Remember")], [T("this colour")]], blob: c, small: "don't press", time: 2.4, none: true, want: "nothing" }; } },
-    recallColor: { from: 8, ok: () => state.memColor && state.sinceMem >= 2, make: () => { const c = state.memColor; state.memColor = null; return { lines: [[T("Press the colour")], [T("you remembered")]], time: 3, seq: [c], want: COLORS[c].name }; } },
-    rememberNumber: { from: 9, ok: () => !state.memNumber, make: () => { const n = between(2, 4); state.memNumber = n; return { lines: [[T("Remember")], [T("this number")]], big: String(n), small: "don't press", time: 2.4, none: true, want: "nothing" }; } },
-    recallNumber: { from: 10, ok: () => state.memNumber && state.sinceNum >= 2, make: () => { const c = pick(KEYS), n = state.memNumber; state.memNumber = null; return { lines: [[T("Press "), C(c)], [T("your number of times")]], time: 4, seq: Array(n).fill(c), want: `${COLORS[c].name} ×${n}` }; } },
-    rule: { from: 10, ok: () => !state.rule, make: () => { const c = pick(KEYS); state.rule = c; return { lines: [[T("From now on:")], [T("⭐ = press "), C(c)]], small: "even if the card says else", time: 3.4, none: true, want: "nothing" }; } },
-    ink: { from: 11, make: () => { const word = pick(KEYS); const ink = pick(others(word)); const askInk = rand() < 0.5; const c = askInk ? ink : word; return { lines: [[T(askInk ? "Press the INK colour" : "Press the WORD")]], inkWord: [word, ink], time: 3, seq: [c], want: COLORS[c].name }; } },
-    swap: { from: 12, make: () => { swapSlots(); const inner = KINDS[pick(["simple", "position"])].make(); inner.small = "the buttons moved!"; inner.time += 0.8; return inner; } },
-  };
+  const C = (k) => [N(k), k];
+  const INK = (s, k) => [s, null, k];
+  const fail = (why) => "FAIL:" + why;
 
-  function swapSlots() { const s = state.slots.slice(); do { for (let i = s.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [s[i], s[j]] = [s[j], s[i]]; } } while (s.join() === state.slots.join()); state.slots = s; state.slotAnim = 0; }
+  // --- Rules ----------------------------------------------------------------------------------
+  // A rule makes an instance from the round context. An instance has prompt lines, optional
+  // visuals, extra time, and handlers that return "PASS", "CONTINUE", or "FAIL:<reason>":
+  // onPress(key, s), onRelease(key, s), onTick(s), and onTimeout(s).
+  const pressColor = (c, extra) => Object.assign({
+    onPress: (k) => (k === c ? "PASS" : fail(`Pressed ${N(k)} instead of ${N(c)}`)),
+    onTimeout: () => fail("Too slow"),
+  }, extra);
+  const exactly = (c, n) => ({
+    onPress: (k, s) => {
+      if (k !== c) return fail(`Pressed ${N(k)} instead of ${N(c)}`);
+      if (s.count[c] > n) return fail(`Too many: ${s.count[c]} presses, wanted ${n}`);
+      if (s.count[c] === n) s.left = Math.min(s.left, 0.8);
+      return "CONTINUE";
+    },
+    onTimeout: (s) => (s.count[c] === n ? "PASS" : fail(`Only ${s.count[c]} of ${n} presses`)),
+    counter: c,
+  });
+  const RULES = [
+    { id: "press", tier: 1, make: () => { const c = pick(KEYS); return pressColor(c, { lines: [[T("Press "), C(c)]] }); } },
+    { id: "nothing", tier: 1, make: () => ({
+      lines: pick([[[T("Do NOT press")], [T("anything")]], [[T("Hands off!")]], [[T("Don't touch")], [T("the buttons")]]]),
+      time: -1, onPress: () => fail("You pressed a button"), onTimeout: () => "PASS" }) },
+    { id: "both", tier: 1, make: () => ({
+      lines: [[T("Press BOTH")], [T("buttons together")]],
+      onPress: (k, s) => (s.down[other(k)] || s.elapsed - s.lastPress[other(k)] < 0.15 ? "PASS" : "CONTINUE"),
+      onTick: (s) => { for (const k of KEYS) if (s.count[k] && !s.count[other(k)] && !s.down[k] && s.elapsed - s.lastPress[k] > 0.15) return fail(`Only ${N(k)} was pressed`); return "CONTINUE"; },
+      onTimeout: () => fail("Too slow") }) },
+    { id: "exact", tier: 1, make: () => { const c = pick(KEYS), n = between(2, 4); return Object.assign(exactly(c, n), { lines: [[T("Press "), C(c)], [T(`exactly ${n} times`)]], time: 0.5 }); } },
+    { id: "position", tier: 1, make: (ctx) => { const i = between(0, 1), word = ["LEFT", "RIGHT"][i], c = ctx.slots[i]; return { lines: [[T("Press the")], [T(`${word} button`)]],
+      onPress: (k) => (k === c ? "PASS" : fail(`That was the ${i ? "LEFT" : "RIGHT"} button`)), onTimeout: () => fail("Too slow") }; } },
 
-  function nextCard() {
-    state.card++;
-    state.sinceMem++; state.sinceNum++;
-    const n = state.card;
-    let names = Object.keys(KINDS).filter((k) => KINDS[k].from <= n && k !== state.lastKind && (!KINDS[k].ok || KINDS[k].ok()));
-    // A newly opened kind comes first, so every new rule gets shown.
-    const fresh = names.filter((k) => KINDS[k].from === n);
-    const kind = fresh.length ? fresh[0] : pick(names);
-    if (kind === "rememberColor") state.sinceMem = 0;
-    if (kind === "rememberNumber") state.sinceNum = 0;
-    state.lastKind = kind;
-    const card = KINDS[kind].make();
-    card.kind = kind;
-    // A standing rule: a star on a later card overrides it.
-    if (state.rule && kind !== "rule" && !card.none && rand() < 0.3) { card.star = true; card.seq = [state.rule]; card.any = null; card.hold = null; card.want = `⭐ → ${COLORS[state.rule].name}`; }
-    else if (state.rule && kind === "nothing" && rand() < 0.3) { card.star = true; card.none = false; card.seq = [state.rule]; card.want = `⭐ → ${COLORS[state.rule].name}`; }
-    card.time *= 1.6 * Math.max(0.75, 1 - (n - 1) * 0.01);
-    card.left = card.time; card.presses = []; card.held = 0;
-    state.cur = card;
-    state.phase = "card";
-  }
+    { id: "stroopText", tier: 2, make: () => { const c = pick(KEYS); return pressColor(c, { lines: [[INK("Press ", other(c)), INK(N(c), other(c))]], small: "do what it SAYS" }); } },
+    { id: "stroopColor", tier: 2, make: () => { const w = pick(KEYS), ink = other(w); return pressColor(ink, { lines: [[T("Press the COLOUR")], [T("of this word:")]], inkWord: [N(w), ink] }); } },
+    { id: "sequence", tier: 2, make: () => { const n = between(2, 3), seq = [pick(KEYS)]; while (seq.length < n) seq.push(rand() < 0.75 ? other(seq[seq.length - 1]) : seq[seq.length - 1]);
+      const line = []; seq.forEach((k, i) => { if (i) line.push(T(", ")); line.push(C(k)); });
+      return { lines: n === 2 ? [[T("Press "), C(seq[0]), T(",")], [T("then "), C(seq[1])]] : [[T("In this order:")], line], time: 0.6,
+        onPress: (k, s) => { const i = s.seq.length - 1; if (seq[i] !== k) return fail(`Wrong order: ${N(k)} came ${["first", "second", "third"][i]}`); return s.seq.length === seq.length ? "PASS" : "CONTINUE"; },
+        onTimeout: () => fail("The order was not finished") }; } },
+    { id: "alternate", tier: 2, make: () => ({ lines: [[T("Alternate the")], [T("buttons 4 times")]], small: "start with either", time: 0.6,
+      onPress: (k, s) => { const q = s.seq; if (q.length >= 2 && q[q.length - 1] === q[q.length - 2]) return fail(`${N(k)} twice in a row`); return q.length === 4 ? "PASS" : "CONTINUE"; },
+      onTimeout: (s) => fail(`Only ${s.seq.length} of 4 presses`) }) },
+    { id: "hold", tier: 2, make: () => { const c = pick(KEYS), dur = 1.5; return { lines: [[T("Hold "), C(c)], [T("for 1.5 seconds")]], hold: [c, dur], time: 0.4,
+      onPress: (k) => (k === c ? "CONTINUE" : fail(`Pressed ${N(k)}`)),
+      onRelease: (k, s) => (k === c && s.elapsed - s.downAt[c] < dur ? fail("Let go too early") : "CONTINUE"),
+      onTick: (s) => (s.down[c] && s.elapsed - s.downAt[c] >= dur ? "PASS" : "CONTINUE"),
+      onTimeout: () => fail("Not held long enough") }; } },
+    { id: "count", tier: 2, make: () => {
+      const kinds = ["circle", "square", "triangle"], tones = ["Y", "G", "R", "B"];
+      const target = [pick(kinds), pick(tones)], n = between(1, 3), shapes = [];
+      for (let i = 0; i < n; i++) shapes.push(target);
+      const size = between(5, 7);
+      while (shapes.length < size) { const s = [pick(kinds), pick(tones)]; if (s[0] !== target[0] || s[1] !== target[1]) shapes.push(s); }
+      for (let i = shapes.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [shapes[i], shapes[j]] = [shapes[j], shapes[i]]; }
+      const c = pick(KEYS);
+      return Object.assign(exactly(c, n), { lines: [[T("Press "), C(c), T(" once for")], [T("every "), [`${N(target[1])} ${target[0].toUpperCase()}`, target[1]]]], shapes, time: 1.2 }); } },
+    { id: "math", tier: 2, make: () => { const a = between(2, 9), b = between(2, 9), right = rand() < 0.5, shown = right ? a + b : a + b + pick([-2, -1, 1, 2]); const yes = pick(KEYS), no = other(yes), c = right ? yes : no;
+      return pressColor(c, { lines: [[T("Press "), C(yes), T(" if")], [T(`${a} + ${b} = ${shown}`)], [T("else "), C(no)]], time: 0.8 }); } },
+    { id: "doubleNot", tier: 2, make: () => { const c = pick(KEYS); return pressColor(c, { lines: [[T("Don't NOT")], [T("press "), C(c)]] }); } },
+    { id: "corners", tier: 2, make: () => { const c = pick(KEYS), n = between(3, 6); return Object.assign(exactly(c, n), { lines: [[T("Press "), C(c), T(" once")], [T("per corner")]], polygon: n, time: 1 }); } },
 
-  // --- State and flow -------------------------------------------------------------------------
-  let state, t = 0, last = performance.now();
-  function reset(startCard) {
-    const seed = Math.floor(Math.random() * 1e6);
-    rand = mulberry(seed);
-    document.getElementById("seed").textContent = `tohum ${seed}`;
-    state = { card: (startCard || 1) - 1, lives: 3, score: 0, streak: 0, slots: KEYS.slice(), slotAnim: 1, lastKind: null, memColor: null, memNumber: null, sinceMem: 9, sinceNum: 9, rule: null, cur: null, phase: "card", verdict: null, wait: 0, pressed: {}, mood: "wait" };
-    nextCard();
-  }
-  function finish(ok) {
-    const card = state.cur;
-    state.phase = "verdict"; state.verdict = ok; state.wait = ok ? 1.0 : 2.4; state.mood = ok ? "happy" : "sad";
-    if (ok) { state.streak++; state.score += 10 + 2 * Math.min(state.streak, 10); } else { state.streak = 0; state.lives--; }
-    if (card.kind === "swap" && !ok) state.wait += 0.3;
-  }
-  function press(key) {
-    if (state.phase === "over") { reset(1); return; }
-    if (state.phase !== "card") return;
-    const card = state.cur;
-    if (card.hold) { if (key !== card.hold) finish(false); return; }
-    if (card.none) { finish(false); return; }
-    if (card.any) { finish(card.any.includes(key)); return; }
-    card.presses.push(key);
-    const i = card.presses.length - 1;
-    if (card.seq[i] !== key) finish(false);
-    else if (card.presses.length === card.seq.length) finish(true);
-  }
-  function release(key) {
-    if (state.phase !== "card") return;
-    const card = state.cur;
-    if (card.hold === key && card.held > 0 && card.held < card.holdFor) finish(false);
-  }
-  function step(dt) {
-    state.slotAnim = Math.min(1, state.slotAnim + dt * 3);
-    if (state.phase === "card") {
-      const card = state.cur;
-      if (card.hold && state.pressed[card.hold]) { card.held += dt; if (card.held >= card.holdFor) { finish(true); return; } }
-      card.left -= dt;
-      if (card.left <= 0) finish(!!card.none);
-    } else if (state.phase === "verdict") {
-      state.wait -= dt;
-      if (state.wait <= 0) { state.mood = "wait"; if (state.lives <= 0) state.phase = "over"; else nextCard(); }
-    }
-  }
+    { id: "same", tier: 3, ok: (ctx) => ctx.last && ctx.last.single, make: (ctx) => { const c = ctx.last.single; return pressColor(c, { lines: [[T("Press the SAME")], [T("button as last round")]] }); } },
+    { id: "opposite", tier: 3, ok: (ctx) => ctx.last && ctx.last.single, make: (ctx) => { const c = other(ctx.last.single); return pressColor(c, { lines: [[T("Press the OTHER")], [T("button from last round")]] }); } },
+    { id: "swap", tier: 3, make: (ctx) => { swapSlots(); ctx.slots = game.slots; if (rand() < 0.5) { const inst = RULES.find((r) => r.id === "position").make(ctx); inst.small = "the buttons swapped!"; inst.time = 0.8; return inst; }
+      const c = pick(KEYS); return pressColor(c, { lines: [[T("Press "), C(c)]], small: "the buttons swapped!", time: 0.8 }); } },
+    { id: "holdTap", tier: 3, make: () => { const c = pick(KEYS), o = other(c); return { lines: [[T("Hold "), C(c), T(" and")], [T("tap "), C(o), T(" twice")]], time: 1.2,
+      onPress: (k, s) => { if (k === c) return "CONTINUE"; if (!s.down[c]) return fail(`Tapped ${N(o)} without holding ${N(c)}`); return s.count[o] >= 2 ? "PASS" : "CONTINUE"; },
+      onRelease: (k, s) => (k === c && s.count[o] < 2 ? fail(`Let go of ${N(c)} too early`) : "CONTINUE"),
+      onTimeout: () => fail("Too slow") }; } },
+    { id: "lastSecond", tier: 3, make: () => { const c = pick(KEYS); return { lines: [[T("Press "), C(c), T(" only in")], [T("the last second")]], small: "wait for the red zone", zone: 1, time: 0.6,
+      onPress: (k, s) => { if (s.left > 1.0) return fail(`Too early: ${s.left.toFixed(1)} s were left`); return k === c ? "PASS" : fail(`Pressed ${N(k)} instead of ${N(c)}`); },
+      onTimeout: () => fail("Too late") }; } },
+    { id: "starRule", tier: 3, ok: (ctx) => !ctx.rule, make: () => { const c = pick(KEYS); game.rule = c; return { lines: [[T("From now on:")], [T("⭐ means press "), C(c)]], small: "remember it! press nothing now", time: 0.4, onPress: () => fail("Nothing to press yet"), onTimeout: () => "PASS" }; } },
+  ];
 
-  // --- Input ------------------------------------------------------------------------------------
+  // --- Game state ------------------------------------------------------------------------------
   const canvas = document.getElementById("board");
   const c = canvas.getContext("2d");
   const dpr = Math.min(window.devicePixelRatio || 1, 3);
   canvas.width = W * dpr; canvas.height = H * dpr;
-  const slotX = (i) => SLOT_X[i];
-  function keyAt(x, y) { for (let i = 0; i < KEYS.length; i++) if (Math.hypot(x - slotX(i), y - BTN_Y) < BTN_R + 10) return state.slots[i]; return null; }
+  let game, t = 0, last = performance.now(), muted = false, best = 0;
+  try { best = Number(localStorage.getItem("buttonbot.best") || 0); } catch (e) { best = 0; }
+
+  function newGame(startRound) {
+    rand = mulberry(Math.floor(Math.random() * 1e9));
+    game = { phase: "menu", round: (startRound || 1) - 1, lives: 3, score: 0, streak: 0, slots: KEYS.slice(), slotX: { R: SLOT_X[0], B: SLOT_X[1] },
+      last: null, lastId: null, rule: null, inst: null, s: null, verdict: null, why: "", wait: 0, mood: "wait", shake: 0, flash: 0, flashColor: "", parts: [], pulse: 0,
+      pressed: game ? game.pressed : { R: false, B: false }, beat: 0, overWait: 0, record: false };
+  }
+  function start() { game.phase = "play"; nextRound(); }
+  function swapSlots() { game.slots = game.slots.slice().reverse(); }
+  function tierOf(round) { return round <= 5 ? 1 : round <= 15 ? 2 : 3; }
+  function baseTime(round) { const tier = tierOf(round); return tier === 1 ? 4.5 : tier === 2 ? 4.2 : Math.max(2.8, 3.9 - (round - 16) * 0.05); }
+
+  function nextRound() {
+    game.round++;
+    const tier = tierOf(game.round);
+    const ctx = { round: game.round, last: game.last, slots: game.slots, rule: game.rule };
+    let pool = RULES.filter((r) => r.tier <= tier && r.id !== game.lastId && (!r.ok || r.ok(ctx)));
+    // A new tier shows its own rules more often.
+    const top = pool.filter((r) => r.tier === tier);
+    if (tier > 1 && top.length && rand() < 0.6) pool = top;
+    const rule = pick(pool);
+    const inst = rule.make(ctx);
+    inst.id = rule.id;
+    // A standing rule: a star on a card overrides what the card says.
+    if (game.rule && rule.id !== "starRule" && rand() < 0.22) {
+      const k = game.rule;
+      Object.assign(inst, { star: true, onPress: (key) => (key === k ? "PASS" : fail(`⭐ means ${N(k)}`)), onRelease: null, onTick: null, onTimeout: () => fail(`⭐ means press ${N(k)}`), zone: 0, hold: null, counter: null });
+    }
+    inst.total = Math.max(2.4, baseTime(game.round) + (inst.time || 0));
+    game.inst = inst;
+    game.lastId = rule.id;
+    game.s = { down: { R: false, B: false }, count: { R: 0, B: 0 }, seq: [], downAt: { R: 0, B: 0 }, lastPress: { R: -9, B: -9 }, elapsed: 0, left: inst.total };
+    game.phase = "play";
+    game.mood = "wait";
+  }
+
+  function resolve(result) {
+    if (!result || result === "CONTINUE" || game.phase !== "play") return;
+    const ok = result === "PASS";
+    const s = game.s, distinct = [...new Set(s.seq)];
+    game.last = { id: game.inst.id, single: distinct.length === 1 ? distinct[0] : null, passed: ok };
+    game.phase = "feedback"; game.verdict = ok; game.why = ok ? "" : result.slice(5);
+    game.wait = ok ? 0.8 : 1.9;
+    game.mood = ok ? "happy" : "sad";
+    game.flash = 1; game.flashColor = ok ? "rgba(61,220,132," : "rgba(255,77,94,";
+    if (ok) {
+      game.score++; game.streak++; sound("pass"); burst();
+      if (game.streak % 5 === 0) { game.pulse = 1; sound("streak"); }
+    } else { game.lives--; game.streak = 0; game.shake = 1; sound("fail"); }
+  }
+
+  // --- Input -------------------------------------------------------------------------------------
+  function press(key) {
+    if (game.pressed[key]) return;
+    game.pressed[key] = true;
+    sound(key === "R" ? "pressR" : "pressB");
+    if (game.phase === "menu") { start(); return; }
+    if (game.phase === "over") { if (game.overWait <= 0) { newGame(1); start(); } return; }
+    if (game.phase !== "play") return;
+    const s = game.s;
+    s.down[key] = true; s.count[key]++; s.seq.push(key); s.downAt[key] = s.elapsed; s.lastPress[key] = s.elapsed;
+    resolve(game.inst.onPress ? game.inst.onPress(key, s) : "CONTINUE");
+  }
+  function release(key) {
+    if (!game.pressed[key]) return;
+    game.pressed[key] = false;
+    if (game.phase !== "play" || !game.s.down[key]) return;
+    game.s.down[key] = false;
+    if (game.inst.onRelease) resolve(game.inst.onRelease(key, game.s));
+  }
+  function keyAt(x, y) { for (let i = 0; i < 2; i++) if (Math.hypot(x - SLOT_X[i], y - BTN_Y) < BTN_R + 14) return game.slots[i]; return null; }
   const pointers = {};
   canvas.addEventListener("pointerdown", (ev) => {
-    ev.preventDefault();
+    ev.preventDefault(); unlockAudio();
     const r = canvas.getBoundingClientRect();
     const x = (ev.clientX - r.left) * W / r.width, y = (ev.clientY - r.top) * H / r.height;
-    if (state.phase === "over") { reset(1); return; }
-    const key = keyAt(x, y); if (!key) return;
-    pointers[ev.pointerId] = key; state.pressed[key] = true; press(key);
+    const key = keyAt(x, y);
+    if (!key) { if (game.phase === "menu") start(); else if (game.phase === "over" && game.overWait <= 0) { newGame(1); start(); } return; }
+    pointers[ev.pointerId] = key; try { canvas.setPointerCapture(ev.pointerId); } catch (e) { /* ignore */ } press(key);
   });
-  const up = (ev) => { const key = pointers[ev.pointerId]; if (!key) return; delete pointers[ev.pointerId]; state.pressed[key] = false; release(key); };
-  canvas.addEventListener("pointerup", up); canvas.addEventListener("pointercancel", up); canvas.addEventListener("pointerleave", up);
-  const KEYMAP = { "1": 0, "2": 1 };
-  window.addEventListener("keydown", (ev) => { if (ev.repeat || !(ev.key in KEYMAP)) return; const key = state.slots[KEYMAP[ev.key]]; state.pressed[key] = true; press(key); });
-  window.addEventListener("keyup", (ev) => { if (!(ev.key in KEYMAP)) return; const key = state.slots[KEYMAP[ev.key]]; state.pressed[key] = false; release(key); });
+  const up = (ev) => { const key = pointers[ev.pointerId]; if (!key) return; delete pointers[ev.pointerId]; release(key); };
+  canvas.addEventListener("pointerup", up); canvas.addEventListener("pointercancel", up);
+  const keySlot = (ev) => (["a", "A", "ArrowLeft", "1"].includes(ev.key) ? 0 : ["d", "D", "ArrowRight", "2"].includes(ev.key) ? 1 : -1);
+  const heldBy = {};
+  window.addEventListener("keydown", (ev) => {
+    unlockAudio();
+    if (ev.key === " " && (game.phase === "menu" || (game.phase === "over" && game.overWait <= 0))) { ev.preventDefault(); newGame(1); start(); return; }
+    if (ev.key === "m" || ev.key === "M") { toggleMute(); return; }
+    const slot = keySlot(ev); if (slot < 0 || ev.repeat) return;
+    ev.preventDefault(); const key = game.slots[slot]; heldBy[ev.key.toLowerCase()] = key; press(key);
+  });
+  window.addEventListener("keyup", (ev) => { const key = heldBy[ev.key.toLowerCase()]; if (!key) return; delete heldBy[ev.key.toLowerCase()]; release(key); });
 
-  // --- Drawing ----------------------------------------------------------------------------------
-  function dot(x, y, r, f) { c.beginPath(); c.arc(x, y, r, 0, TAU); c.fillStyle = f; c.fill(); }
-  function rr(x, y, w, h, r) { c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); }
-  function lin(x0, y0, x1, y1, st) { const g = c.createLinearGradient(x0, y0, x1, y1); st.forEach(([o, col]) => g.addColorStop(o, col)); return g; }
-  function rad(x, y, r0, r1, st) { const g = c.createRadialGradient(x, y, r0, x, y, r1); st.forEach(([o, col]) => g.addColorStop(o, col)); return g; }
-  function star(x, y, r, fill) { c.beginPath(); for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, d = i % 2 ? r * 0.45 : r; c.lineTo(x + Math.cos(a) * d, y + Math.sin(a) * d); } c.closePath(); c.fillStyle = fill; c.fill(); c.lineWidth = 2; c.strokeStyle = "#b45309"; c.stroke(); }
-  function heart(x, y, s, f) { c.beginPath(); for (let i = 0; i < 30; i++) { const k = i * TAU / 30; c.lineTo(x + 16 * Math.pow(Math.sin(k), 3) * s / 16, y - (13 * Math.cos(k) - 5 * Math.cos(2 * k) - 2 * Math.cos(3 * k) - Math.cos(4 * k)) * s / 16); } c.closePath(); c.fillStyle = f; c.fill(); }
-
-  function drawRoom() {
-    c.fillStyle = lin(0, 0, 0, H, [[0, "#2a2f5c"], [0.55, "#1b1f40"], [1, "#11132a"]]); c.fillRect(0, 0, W, H);
-    for (let i = 0; i < 26; i++) dot((i * 97) % W, (i * 53) % 220, 1 + (i % 3) * 0.5, `rgba(255,255,255,${0.15 + (i % 4) * 0.06})`);
+  // --- Update -------------------------------------------------------------------------------------
+  function step(dt) {
+    for (let i = 0; i < 2; i++) { const k = game.slots[i]; game.slotX[k] += (SLOT_X[i] - game.slotX[k]) * Math.min(1, dt * 9); }
+    game.shake = Math.max(0, game.shake - dt * 3); game.flash = Math.max(0, game.flash - dt * 2.5); game.pulse = Math.max(0, game.pulse - dt * 1.2);
+    for (const p of game.parts) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 420 * dt; p.life -= dt; }
+    game.parts = game.parts.filter((p) => p.life > 0);
+    if (game.phase === "play") {
+      const s = game.s, inst = game.inst;
+      const before = s.left;
+      s.elapsed += dt; s.left -= dt;
+      // Ticks in the last three seconds, and a heartbeat in the last one.
+      if (Math.ceil(before) !== Math.ceil(s.left) && s.left > 0 && s.left < 3) sound("tick");
+      if (s.left < 1.2) { game.beat -= dt; if (game.beat <= 0) { sound("beat"); game.beat = 0.45; } }
+      if (inst.onTick) resolve(inst.onTick(s));
+      if (game.phase === "play" && s.left <= 0) resolve(inst.onTimeout(s));
+    } else if (game.phase === "feedback") {
+      game.wait -= dt;
+      if (game.wait <= 0) {
+        if (game.lives <= 0) { game.phase = "over"; game.overWait = 0.8; if (game.score > best) { best = game.score; game.record = true; try { localStorage.setItem("buttonbot.best", String(best)); } catch (e) { /* private mode */ } } }
+        else nextRound();
+      }
+    } else if (game.phase === "over") game.overWait -= dt;
   }
-  function drawRobot() {
-    const x = 180, y = 92 + Math.sin(t * 2) * 2;
-    // Antenna with a blinking bulb.
-    c.strokeStyle = "#9aa3c7"; c.lineWidth = 4; c.beginPath(); c.moveTo(x, y - 52); c.lineTo(x, y - 74); c.stroke();
-    const blink = Math.sin(t * 4) > 0;
-    dot(x, y - 78, 8, state.mood === "sad" ? "#ef4444" : state.mood === "happy" ? "#4ade80" : blink ? "#facc15" : "#a16207");
-    // Ears.
-    for (const s of [-1, 1]) { rr(x + s * 82 - 9, y - 16, 18, 36, 7); c.fillStyle = "#7c86b0"; c.fill(); }
-    // Head.
-    rr(x - 80, y - 54, 160, 108, 34); c.fillStyle = lin(0, y - 54, 0, y + 54, [[0, "#dfe4f5"], [1, "#a9b2d6"]]); c.fill();
-    rr(x - 66, y - 40, 132, 80, 24); c.fillStyle = "#1c2242"; c.fill();
-    // Face on the visor.
-    const eyeY = y - 8, mood = state.mood;
-    for (const s of [-1, 1]) {
-      if (mood === "happy") { c.beginPath(); c.arc(x + s * 28, eyeY + 4, 11, Math.PI * 1.1, Math.PI * 1.9); c.lineWidth = 5; c.strokeStyle = "#7df9ff"; c.lineCap = "round"; c.stroke(); }
-      else if (mood === "sad") { c.beginPath(); c.moveTo(x + s * 28 - 10, eyeY - 2 - s * 0); c.lineTo(x + s * 28 + 10, eyeY + 2 * -s); c.lineWidth = 5; c.strokeStyle = "#ff8a8a"; c.lineCap = "round"; c.stroke(); }
-      else { const sh = (t % 3.4) < 0.14 ? 2 : 12; rr(x + s * 28 - 9, eyeY - sh / 2, 18, sh, 6); c.fillStyle = "#7df9ff"; c.fill(); }
+  function burst() { for (let i = 0; i < 28; i++) { const a = rand() * TAU, v = 120 + rand() * 220; game.parts.push({ x: 180, y: 300, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 160, life: 0.9 + rand() * 0.4, color: pick(["#ff4d5e", "#3d8bff", "#ffd23f", "#3ddc84", "#ffffff"]), size: 3 + rand() * 4, spin: rand() * TAU }); } }
+
+  // --- Sound (Web Audio, synthesized) ---------------------------------------------------------------
+  let audio = null;
+  function unlockAudio() { if (!audio) { try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { audio = null; } } if (audio && audio.state === "suspended") audio.resume(); }
+  function tone(freq, dur, type, vol, slide, delay) {
+    if (!audio || muted) return;
+    const t0 = audio.currentTime + (delay || 0), o = audio.createOscillator(), g = audio.createGain();
+    o.type = type; o.frequency.setValueAtTime(freq, t0); if (slide) o.frequency.exponentialRampToValueAtTime(slide, t0 + dur);
+    g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(vol, t0 + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    o.connect(g); g.connect(audio.destination); o.start(t0); o.stop(t0 + dur + 0.02);
+  }
+  function sound(kind) {
+    switch (kind) {
+      case "pressR": tone(330, 0.08, "square", 0.08, 220); break;
+      case "pressB": tone(494, 0.08, "square", 0.08, 330); break;
+      case "tick": tone(1200, 0.04, "sine", 0.06); break;
+      case "beat": tone(70, 0.12, "sine", 0.35, 50); tone(70, 0.1, "sine", 0.25, 50, 0.14); break;
+      case "pass": tone(784, 0.12, "triangle", 0.18); tone(1175, 0.2, "triangle", 0.16, null, 0.08); break;
+      case "streak": [784, 988, 1175, 1568].forEach((f, i) => tone(f, 0.14, "triangle", 0.14, null, 0.2 + i * 0.07)); break;
+      case "fail": tone(180, 0.35, "sawtooth", 0.14, 90); tone(120, 0.35, "square", 0.08, 70); break;
     }
-    c.beginPath(); c.lineWidth = 4; c.lineCap = "round"; c.strokeStyle = mood === "sad" ? "#ff8a8a" : "#7df9ff";
-    if (mood === "happy") c.arc(x, y + 14, 12, 0.15 * Math.PI, 0.85 * Math.PI);
-    else if (mood === "sad") c.arc(x, y + 28, 10, 1.2 * Math.PI, 1.8 * Math.PI);
-    else { c.moveTo(x - 10, y + 20); c.lineTo(x + 10, y + 20); }
-    c.stroke();
-    dot(x - 50, y + 18, 6, "rgba(255,120,150,0.35)"); dot(x + 50, y + 18, 6, "rgba(255,120,150,0.35)");
+  }
+  function toggleMute() { muted = !muted; document.getElementById("mute").textContent = muted ? "Ses: kapalı" : "Ses: açık"; }
+
+  // --- Drawing kit --------------------------------------------------------------------------------
+  const dot = (x, y, r, f) => { c.beginPath(); c.arc(x, y, r, 0, TAU); c.fillStyle = f; c.fill(); };
+  function rr(x, y, w, h, r) { c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); }
+  const lin = (x0, y0, x1, y1, st) => { const g = c.createLinearGradient(x0, y0, x1, y1); st.forEach(([o, col]) => g.addColorStop(o, col)); return g; };
+  const rad = (x, y, r0, r1, st) => { const g = c.createRadialGradient(x, y, r0, x, y, r1); st.forEach(([o, col]) => g.addColorStop(o, col)); return g; };
+  function heart(x, y, s, f) { c.beginPath(); for (let i = 0; i < 30; i++) { const k = i * TAU / 30; c.lineTo(x + 16 * Math.pow(Math.sin(k), 3) * s / 16, y - (13 * Math.cos(k) - 5 * Math.cos(2 * k) - 2 * Math.cos(3 * k) - Math.cos(4 * k)) * s / 16); } c.closePath(); c.fillStyle = f; c.fill(); }
+  function star(x, y, r) { c.beginPath(); for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, d = i % 2 ? r * 0.45 : r; c.lineTo(x + Math.cos(a) * d, y + Math.sin(a) * d); } c.closePath(); c.fillStyle = "#ffd23f"; c.shadowColor = "#ffb800"; c.shadowBlur = 16; c.fill(); c.shadowBlur = 0; c.lineWidth = 2; c.strokeStyle = "#c98500"; c.stroke(); }
+  function shape(kind, x, y, r, fill) {
+    c.beginPath();
+    if (kind === "circle") c.arc(x, y, r, 0, TAU);
+    else if (kind === "square") rr(x - r * 0.88, y - r * 0.88, r * 1.76, r * 1.76, 4);
+    else { c.moveTo(x, y - r * 1.05); c.lineTo(x + r, y + r * 0.75); c.lineTo(x - r, y + r * 0.75); c.closePath(); }
+    c.fillStyle = fill; c.shadowColor = fill; c.shadowBlur = 10; c.fill(); c.shadowBlur = 0;
+    c.lineWidth = 2; c.strokeStyle = "rgba(255,255,255,0.35)"; c.stroke();
+  }
+  const bokeh = Array.from({ length: 14 }, (_, i) => ({ x: (i * 83) % W, y: 60 + (i * 137) % 420, r: 18 + (i * 7) % 30, sp: 0.2 + (i % 5) * 0.08, hue: ["255,77,94", "61,139,255", "160,110,255", "61,220,200"][i % 4] }));
+
+  // --- Scene ------------------------------------------------------------------------------------------
+  function drawBackground() {
+    c.fillStyle = rad(180, 260, 20, 520, [[0, "#2b2468"], [0.5, "#17163d"], [1, "#0a0a1e"]]); c.fillRect(0, 0, W, H);
+    for (const b of bokeh) { const y = ((b.y - t * b.sp * 14) % 640 + 640) % 640; c.fillStyle = rad(b.x, y, 0, b.r, [[0, `rgba(${b.hue},0.18)`], [1, `rgba(${b.hue},0)`]]); c.fillRect(b.x - b.r, y - b.r, b.r * 2, b.r * 2); }
+    c.strokeStyle = "rgba(140,150,255,0.08)"; c.lineWidth = 1;
+    for (let i = -8; i <= 8; i++) { c.beginPath(); c.moveTo(180 + i * 12, 470); c.lineTo(180 + i * 70, 640); c.stroke(); }
+    for (let y = 480; y < 640; y += 16 + (y - 480) * 0.25) { c.beginPath(); c.moveTo(0, y); c.lineTo(W, y); c.stroke(); }
   }
   function drawHud() {
-    rr(12, 12, 336, 34, 17); c.fillStyle = "rgba(0,0,0,0.3)"; c.fill();
-    c.font = "700 16px Fredoka, sans-serif"; c.fillStyle = "#e8ecff"; c.textAlign = "left"; c.fillText(`Card ${state.card}`, 26, 35);
-    for (let i = 0; i < 3; i++) { if (i < state.lives) heart(244 + i * 20, 29, 8, "#ff5d73"); else { c.beginPath(); c.arc(244 + i * 20, 29, 6, 0, TAU); c.lineWidth = 1.5; c.strokeStyle = "rgba(255,255,255,0.35)"; c.stroke(); } }
-    c.textAlign = "right"; c.fillStyle = "#e8ecff"; c.fillText(state.score, 334, 35);
+    for (let i = 0; i < 3; i++) { if (i < game.lives) heart(30 + i * 24, 30, 9, "#ff4d6d"); else { c.beginPath(); c.arc(30 + i * 24, 29, 7, 0, TAU); c.lineWidth = 1.6; c.strokeStyle = "rgba(255,255,255,0.3)"; c.stroke(); } }
+    rr(130, 14, 100, 30, 15); c.fillStyle = "rgba(255,255,255,0.08)"; c.fill();
+    c.font = "700 15px Fredoka, sans-serif"; c.textAlign = "center"; c.fillStyle = "#cfd5ff"; c.fillText(`ROUND ${Math.max(1, game.round)}`, 180, 35);
+    c.textAlign = "right"; c.font = "700 22px Fredoka, sans-serif"; c.fillStyle = "#ffffff"; c.fillText(game.score, 336, 37);
   }
-  function drawScreen() {
-    const card = state.cur, x = 20, y = 176, w = 320, h = 270;
-    rr(x - 6, y - 6, w + 12, h + 12, 30); c.fillStyle = "#8d96bf"; c.fill();
-    rr(x, y, w, h, 24); c.fillStyle = rad(180, y + 110, 20, 220, [[0, "#26305e"], [1, "#141938"]]); c.fill();
-    // Scan lines.
-    c.fillStyle = "rgba(255,255,255,0.025)"; for (let ly = y + 4; ly < y + h; ly += 6) c.fillRect(x + 6, ly, w - 12, 2);
-    if (!card) return;
-    let top = y + 62;
-    const fontSize = 30;
-    c.textAlign = "left"; c.textBaseline = "alphabetic";
-    for (const line of card.lines) {
-      c.font = `700 ${fontSize}px Fredoka, sans-serif`;
-      let width = line.reduce((s, [txt]) => s + c.measureText(txt).width, 0);
-      if (width > 288) { c.font = `700 ${Math.floor(fontSize * 288 / width)}px Fredoka, sans-serif`; width = line.reduce((s, [txt]) => s + c.measureText(txt).width, 0); }
+  function drawTimer() {
+    const inst = game.inst, s = game.s, x = 20, y = 56, w = 320, h = 14;
+    rr(x, y, w, h, 7); c.fillStyle = "rgba(255,255,255,0.1)"; c.fill();
+    if (!inst || game.phase === "menu") return;
+    const frac = game.phase === "over" ? 0 : Math.max(0, s.left / inst.total);
+    if (inst.zone) { rr(x, y, w * (1 / inst.total), h, 7); c.fillStyle = "rgba(255,77,94,0.4)"; c.fill(); }
+    const col = frac > 0.55 ? "#3ddc84" : frac > 0.25 ? "#ffd23f" : "#ff4d5e";
+    if (frac > 0) { rr(x, y, Math.max(h, w * frac), h, 7); c.fillStyle = col; c.shadowColor = col; c.shadowBlur = 12; c.fill(); c.shadowBlur = 0; rr(x + 4, y + 2, Math.max(0, w * frac - 8), 4, 2); c.fillStyle = "rgba(255,255,255,0.35)"; c.fill(); }
+  }
+  function drawBot() {
+    const x = 180, y = 123 + Math.sin(t * 2.2) * 2, mood = game.mood;
+    c.strokeStyle = "#a9b3e6"; c.lineWidth = 3; c.beginPath(); c.moveTo(x, y - 30); c.quadraticCurveTo(x + 6, y - 38, x, y - 44); c.stroke();
+    const bulb = mood === "happy" ? "#3ddc84" : mood === "sad" ? "#ff4d5e" : Math.sin(t * 5) > 0 ? "#ffd23f" : "#a77d10";
+    dot(x, y - 46, 12, rad(x, y - 46, 0, 12, [[0, bulb], [1, "rgba(0,0,0,0)"]])); dot(x, y - 46, 5, bulb);
+    for (const s of [-1, 1]) { rr(x + s * 58 - 7, y - 10, 14, 22, 6); c.fillStyle = "#8f98d0"; c.fill(); }
+    rr(x - 54, y - 32, 108, 66, 26); c.fillStyle = lin(0, y - 32, 0, y + 34, [[0, "#eef1ff"], [1, "#aab3e3"]]); c.fill();
+    rr(x - 44, y - 23, 88, 46, 18); c.fillStyle = "#151a3d"; c.fill();
+    const eye = mood === "sad" ? "#ff8a94" : mood === "happy" ? "#5cf0a8" : "#7df9ff";
+    c.lineCap = "round"; c.strokeStyle = eye; c.fillStyle = eye; c.lineWidth = 4;
+    for (const s of [-1, 1]) {
+      const ex = x + s * 18, ey = y - 4;
+      if (mood === "happy") { c.beginPath(); c.arc(ex, ey + 4, 7, Math.PI * 1.1, Math.PI * 1.9); c.stroke(); }
+      else if (mood === "sad") { c.beginPath(); c.moveTo(ex - 7, ey - 2 * s); c.lineTo(ex + 7, ey + 2 * s); c.stroke(); }
+      else { const h = (t % 3.3) < 0.13 ? 2 : 10; rr(ex - 5, ey - h / 2, 10, h, 4); c.fill(); }
+    }
+    c.beginPath();
+    if (mood === "happy") c.arc(x, y + 6, 8, 0.15 * Math.PI, 0.85 * Math.PI); else if (mood === "sad") c.arc(x, y + 16, 7, 1.2 * Math.PI, 1.8 * Math.PI); else { c.moveTo(x - 6, y + 11); c.lineTo(x + 6, y + 11); }
+    c.stroke();
+  }
+  function drawCard() {
+    const x = 18, y = 162, w = 324, h = 290, inst = game.inst;
+    c.save();
+    if (game.pulse > 0) { const k = 1 + Math.sin(game.pulse * Math.PI) * 0.03; c.translate(180, y + h / 2); c.scale(k, k); c.translate(-180, -(y + h / 2)); }
+    rr(x - 2, y + 6, w + 4, h, 28); c.fillStyle = "rgba(0,0,0,0.35)"; c.fill();
+    rr(x, y, w, h, 26); c.fillStyle = lin(0, y, 0, y + h, [[0, "rgba(64,72,150,0.92)"], [1, "rgba(28,30,78,0.95)"]]); c.fill();
+    c.lineWidth = 2; c.strokeStyle = "rgba(170,180,255,0.35)"; c.stroke();
+    rr(x + 10, y + 8, w - 20, 40, 18); c.fillStyle = "rgba(255,255,255,0.05)"; c.fill();
+    if (inst && game.phase !== "menu") drawPrompt(inst, x, y, w, h);
+    if (game.phase === "feedback") drawVerdict(x, y, w, h);
+    c.restore();
+    if (game.pulse > 0) { const r = 160 + (1 - game.pulse) * 120; c.beginPath(); c.ellipse(180, y + h / 2, r, r * 0.9, 0, 0, TAU); c.lineWidth = 6 * game.pulse; c.strokeStyle = `rgba(255,210,63,${game.pulse})`; c.stroke();
+      c.font = "700 26px Fredoka, sans-serif"; c.textAlign = "center"; c.fillStyle = `rgba(255,210,63,${Math.min(1, game.pulse * 2)})`; c.fillText(`${game.streak} in a row!`, 180, y - 8); }
+  }
+  function drawPrompt(inst, x, y, w, h) {
+    const lines = inst.lines, size = lines.length > 2 ? 28 : 32;
+    let top = y + (inst.shapes || inst.polygon || inst.inkWord || inst.hold ? 64 : lines.length > 2 ? 104 : 124);
+    c.textBaseline = "alphabetic"; c.textAlign = "left";
+    for (const line of lines) {
+      c.font = `700 ${size}px Fredoka, sans-serif`;
+      let width = line.reduce((s, [tx]) => s + c.measureText(tx).width, 0);
+      if (width > w - 40) { c.font = `700 ${Math.floor(size * (w - 40) / width)}px Fredoka, sans-serif`; width = line.reduce((s, [tx]) => s + c.measureText(tx).width, 0); }
       let lx = 180 - width / 2;
-      for (const [txt, key] of line) {
-        c.fillStyle = key ? COLORS[key].text : "#eef1ff";
-        c.shadowColor = key ? COLORS[key].face : "rgba(160,190,255,0.6)"; c.shadowBlur = 10;
-        c.fillText(txt, lx, top); lx += c.measureText(txt).width;
+      for (const [tx, key, ink] of line) {
+        const tone = ink ? COLORS[ink].text : key ? COLORS[key].text : "#ffffff";
+        c.fillStyle = tone; c.shadowColor = ink || key ? tone : "rgba(150,170,255,0.7)"; c.shadowBlur = key || ink ? 14 : 8;
+        c.fillText(tx, lx, top); lx += c.measureText(tx).width;
       }
-      c.shadowBlur = 0;
-      top += fontSize + 8;
+      c.shadowBlur = 0; top += size + 10;
     }
-    const midY = top + 36;
-    if (card.quote) { c.font = "600 26px Fredoka, sans-serif"; c.textAlign = "center"; c.fillStyle = "#ffe9a8"; c.fillText(card.quote, 180, top + 22); }
-    if (card.shape) { c.beginPath(); for (let i = 0; i < card.shape; i++) { const a = -Math.PI / 2 + i * TAU / card.shape + (card.shape === 4 ? Math.PI / 4 : 0); c.lineTo(180 + Math.cos(a) * 40, midY + Math.sin(a) * 40); } c.closePath(); c.fillStyle = "#eef1ff"; c.shadowColor = "#9db4ff"; c.shadowBlur = 14; c.fill(); c.shadowBlur = 0; }
-    if (card.blob) { dot(180, midY, 38, COLORS[card.blob].face); dot(168, midY - 12, 10, "rgba(255,255,255,0.4)"); }
-    if (card.big) { c.font = "700 72px Fredoka, sans-serif"; c.textAlign = "center"; c.fillStyle = "#ffffff"; c.shadowColor = "#9db4ff"; c.shadowBlur = 14; c.fillText(card.big, 180, midY + 26); c.shadowBlur = 0; }
-    if (card.inkWord) { const [word, ink] = card.inkWord; c.font = "700 54px Fredoka, sans-serif"; c.textAlign = "center"; c.fillStyle = COLORS[ink].face; c.fillText(COLORS[word].name, 180, midY + 20); }
-    if (card.small) { c.font = "600 16px Fredoka, sans-serif"; c.textAlign = "center"; c.fillStyle = "#9ba8d8"; c.fillText(card.small, 180, y + h - 34); }
-    if (card.star) { star(x + w - 34, y + 34, 20, "#fcd34d"); }
-    // The time bar.
-    const frac = state.phase === "card" ? Math.max(0, card.left / card.time) : 0;
-    rr(x + 24, y + h - 20, w - 48, 8, 4); c.fillStyle = "rgba(255,255,255,0.12)"; c.fill();
-    if (frac > 0) { rr(x + 24, y + h - 20, (w - 48) * frac, 8, 4); c.fillStyle = frac < 0.3 ? "#ff7a7a" : "#7df9ff"; c.fill(); }
-    // The hold bar.
-    if (card.hold && state.phase === "card") { const hf = Math.min(1, card.held / card.holdFor); rr(70, midY - 10, 220, 22, 11); c.fillStyle = "rgba(255,255,255,0.12)"; c.fill(); if (hf > 0) { rr(70, midY - 10, 220 * hf, 22, 11); c.fillStyle = COLORS[card.hold].face; c.fill(); } }
-    // Verdict.
-    if (state.phase === "verdict") {
-      rr(x + 10, y + 10, w - 20, h - 20, 18); c.fillStyle = "rgba(10,12,30,0.82)"; c.fill();
-      c.textAlign = "center";
-      if (state.verdict) { c.font = "700 40px Fredoka, sans-serif"; c.fillStyle = "#4ade80"; c.fillText("✓ Right!", 180, y + 140); }
-      else { c.font = "700 34px Fredoka, sans-serif"; c.fillStyle = "#ff7a7a"; c.fillText("Oops!", 180, y + 110); c.font = "600 20px Fredoka, sans-serif"; c.fillStyle = "#eef1ff"; c.fillText("It was:", 180, y + 146); c.font = "700 22px Fredoka, sans-serif"; c.fillText(card.want, 180, y + 176); }
+    const midY = top + 50;
+    if (inst.shapes) { const n = inst.shapes.length, gap = Math.min(42, (w - 50) / n); inst.shapes.forEach(([k, tone], i) => shape(k, 180 - (n - 1) * gap / 2 + i * gap, midY - 6 + (i % 2) * 14, 15, COLORS[tone].face)); }
+    if (inst.polygon) { c.beginPath(); for (let i = 0; i < inst.polygon; i++) { const a = -Math.PI / 2 + i * TAU / inst.polygon + (inst.polygon === 4 ? Math.PI / 4 : 0); c.lineTo(180 + Math.cos(a) * 44, midY + Math.sin(a) * 44); } c.closePath(); c.fillStyle = lin(0, midY - 44, 0, midY + 44, [[0, "#ffffff"], [1, "#b9c2ff"]]); c.shadowColor = "#9db4ff"; c.shadowBlur = 18; c.fill(); c.shadowBlur = 0; }
+    if (inst.inkWord) { const [word, ink] = inst.inkWord; c.font = "700 60px Fredoka, sans-serif"; c.textAlign = "center"; c.fillStyle = COLORS[ink].face; c.shadowColor = COLORS[ink].face; c.shadowBlur = 18; c.fillText(word, 180, midY + 22); c.shadowBlur = 0; }
+    if (inst.hold && game.phase === "play") { const [k, dur] = inst.hold, s = game.s, f = s.down[k] ? Math.min(1, (s.elapsed - s.downAt[k]) / dur) : 0; rr(60, midY - 12, 240, 26, 13); c.fillStyle = "rgba(255,255,255,0.1)"; c.fill(); if (f > 0) { rr(60, midY - 12, Math.max(26, 240 * f), 26, 13); c.fillStyle = COLORS[k].face; c.shadowColor = COLORS[k].face; c.shadowBlur = 14; c.fill(); c.shadowBlur = 0; } }
+    if (inst.counter && game.phase === "play") { const n = game.s.count[inst.counter]; for (let i = 0; i < n; i++) dot(180 - (n - 1) * 9 + i * 18, y + h - 58, 5, COLORS[inst.counter].face); }
+    if (inst.small) { c.font = "600 16px Fredoka, sans-serif"; c.textAlign = "center"; c.fillStyle = "#aab4ef"; c.fillText(inst.small, 180, y + h - 28); }
+    if (inst.star) star(x + w - 36, y + 38, 22);
+  }
+  function drawVerdict(x, y, w, h) {
+    rr(x + 8, y + 8, w - 16, h - 16, 22); c.fillStyle = game.verdict ? "rgba(14,40,32,0.9)" : "rgba(48,12,22,0.92)"; c.fill();
+    c.textAlign = "center";
+    if (game.verdict) {
+      c.font = "700 44px Fredoka, sans-serif"; c.fillStyle = "#3ddc84"; c.shadowColor = "#3ddc84"; c.shadowBlur = 16; c.fillText("Nice!", 180, y + h / 2 + 4); c.shadowBlur = 0;
+      c.font = "600 18px Fredoka, sans-serif"; c.fillStyle = "#bff5d6"; c.fillText(`+1 · streak ${game.streak}`, 180, y + h / 2 + 38);
+    } else {
+      c.font = "700 40px Fredoka, sans-serif"; c.fillStyle = "#ff6b7a"; c.shadowColor = "#ff4d5e"; c.shadowBlur = 16; c.fillText("Oops!", 180, y + h / 2 - 20); c.shadowBlur = 0;
+      c.font = "600 19px Fredoka, sans-serif"; c.fillStyle = "#ffe3e6";
+      const rows = [""]; for (const wd of game.why.split(" ")) { const tryRow = rows[rows.length - 1] ? rows[rows.length - 1] + " " + wd : wd; if (c.measureText(tryRow).width > w - 60) rows.push(wd); else rows[rows.length - 1] = tryRow; }
+      rows.forEach((row, i) => c.fillText(row, 180, y + h / 2 + 20 + i * 26));
     }
   }
-  function drawPanel() {
-    rr(10, 470, 340, 160, 30); c.fillStyle = lin(0, 470, 0, 630, [[0, "#3a4070"], [1, "#262a4d"]]); c.fill();
-    rr(10, 470, 340, 8, 4); c.fillStyle = "rgba(255,255,255,0.1)"; c.fill();
-    for (let i = 0; i < KEYS.length; i++) {
-      const key = state.slots[i], col = COLORS[key];
-      const x = slotX(i), down = state.pressed[key] ? 6 : 0;
-      const pop = 1 - Math.pow(1 - state.slotAnim, 3);
-      const y = BTN_Y + (1 - pop) * 20;
-      // Base ring.
-      c.beginPath(); c.ellipse(x, y + 18, BTN_R + 12, 26, 0, 0, TAU); c.fillStyle = "#14172e"; c.fill();
-      c.beginPath(); c.ellipse(x, y + 12, BTN_R + 12, 26, 0, 0, TAU); c.fillStyle = "#555d8c"; c.fill();
-      // Button side and dome.
-      c.beginPath(); c.ellipse(x, y + 14, BTN_R, 24, 0, 0, Math.PI); c.lineTo(x - BTN_R, y + down - 2); c.ellipse(x, y + down - 2, BTN_R, 24, 0, Math.PI, TAU); c.closePath(); c.fillStyle = col.edge; c.fill();
-      c.beginPath(); c.ellipse(x, y + down - 4, BTN_R, 27, 0, 0, TAU); c.fillStyle = rad(x - 14, y + down - 14, 4, BTN_R + 6, [[0, "#ffffff"], [0.18, col.face], [1, col.low]]); c.fill();
-      c.beginPath(); c.ellipse(x - 12, y + down - 12, 14, 6, -0.3, 0, TAU); c.fillStyle = "rgba(255,255,255,0.35)"; c.fill();
-      c.font = "700 15px Fredoka, sans-serif"; c.textAlign = "center"; c.fillStyle = "#c9cff0"; c.fillText(col.name, x, 618);
+  function drawButtons() {
+    rr(16, 470, 328, 156, 34); c.fillStyle = lin(0, 470, 0, 626, [[0, "rgba(58,64,128,0.9)"], [1, "rgba(30,32,76,0.95)"]]); c.fill();
+    c.lineWidth = 2; c.strokeStyle = "rgba(170,180,255,0.2)"; c.stroke();
+    for (const key of KEYS) {
+      const col = COLORS[key], x = game.slotX[key], y = BTN_Y, down = game.pressed[key];
+      const depth = down ? 4 : 14;
+      if (down) { c.fillStyle = rad(x, y, 10, BTN_R + 40, [[0, col.glow + "0.55)"], [1, col.glow + "0)"]]); c.fillRect(x - BTN_R - 40, y - BTN_R - 40, (BTN_R + 40) * 2, (BTN_R + 40) * 2); }
+      c.beginPath(); c.ellipse(x, y + 22, BTN_R + 14, 30, 0, 0, TAU); c.fillStyle = "#0d0f24"; c.fill();
+      c.beginPath(); c.ellipse(x, y + 16, BTN_R + 14, 30, 0, 0, TAU); c.fillStyle = lin(0, y - 14, 0, y + 46, [[0, "#c6ccef"], [1, "#5e6596"]]); c.fill();
+      c.beginPath(); c.ellipse(x, y + 16, BTN_R + 4, 24, 0, 0, TAU); c.fillStyle = "#1a1d3a"; c.fill();
+      const top = y + 14 - depth;
+      c.beginPath(); c.ellipse(x, y + 16, BTN_R, 24, 0, 0, Math.PI); c.lineTo(x - BTN_R, top); c.ellipse(x, top, BTN_R, 24, 0, Math.PI, TAU); c.closePath(); c.fillStyle = col.side; c.fill();
+      const g = c.createRadialGradient(x - 18, top - 12, 4, x, top, BTN_R + 10); g.addColorStop(0, "#ffffff"); g.addColorStop(0.16, col.face); g.addColorStop(1, col.low);
+      c.beginPath(); c.ellipse(x, top, BTN_R, 26, 0, 0, TAU); c.fillStyle = g; c.fill();
+      c.beginPath(); c.ellipse(x - 16, top - 9, 20, 7, -0.25, 0, TAU); c.fillStyle = "rgba(255,255,255,0.45)"; c.fill();
+      c.font = "700 16px Fredoka, sans-serif"; c.textAlign = "center"; c.fillStyle = col.text; c.fillText(col.name, x, 612);
     }
+  }
+  function drawParticles() { for (const p of game.parts) { c.save(); c.translate(p.x, p.y); c.rotate(p.spin + t * 6); c.globalAlpha = Math.min(1, p.life * 2); c.fillStyle = p.color; c.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2); c.restore(); } c.globalAlpha = 1; }
+  function overlay(title, lines, sub) {
+    c.fillStyle = "rgba(8,8,24,0.78)"; c.fillRect(0, 0, W, 470);
+    c.textAlign = "center"; c.font = "700 40px Fredoka, sans-serif"; c.fillStyle = "#ffffff"; c.shadowColor = "#7d8bff"; c.shadowBlur = 20; c.fillText(title, 180, 230); c.shadowBlur = 0;
+    c.font = "600 19px Fredoka, sans-serif"; c.fillStyle = "#cfd5ff"; lines.forEach((l, i) => c.fillText(l, 180, 276 + i * 30));
+    c.font = "700 18px Fredoka, sans-serif"; c.fillStyle = `rgba(255,210,63,${0.6 + Math.sin(t * 4) * 0.4})`; c.fillText(sub, 180, 276 + lines.length * 30 + 30);
   }
   function draw() {
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
-    drawRoom(); drawHud(); drawRobot(); drawScreen(); drawPanel();
-    if (state.phase === "over") {
-      c.fillStyle = "rgba(10,12,30,0.8)"; c.fillRect(0, 0, W, H);
-      c.textAlign = "center"; c.fillStyle = "#eef1ff"; c.font = "700 34px Fredoka, sans-serif"; c.fillText("Game over", 180, 280);
-      c.font = "600 19px Fredoka, sans-serif"; c.fillText(`${state.card} cards · score ${state.score}`, 180, 318); c.fillText("tap to play again", 180, 352);
-    }
+    if (game.shake > 0) c.translate((Math.random() - 0.5) * 14 * game.shake, (Math.random() - 0.5) * 10 * game.shake);
+    drawBackground(); drawHud(); drawTimer(); drawBot(); drawCard(); drawButtons(); drawParticles();
+    if (game.flash > 0) { c.fillStyle = game.flashColor + (game.flash * 0.25) + ")"; c.fillRect(-20, -20, W + 40, H + 40); }
+    if (game.phase === "menu") overlay("BUTTON BOT", ["Two buttons. Do exactly what", "the robot says. Three lives.", `Best: ${best}`], "press a button to start");
+    if (game.phase === "over") overlay("Game over", [`Score ${game.score} · ${game.round} rounds`, game.record ? "New best!" : `Best: ${best}`], game.overWait > 0 ? "" : "press a button to play again");
   }
   function frame(now) { const dt = Math.min(0.05, (now - last) / 1000); last = now; t += dt; step(dt); draw(); requestAnimationFrame(frame); }
-  reset(Number(new URLSearchParams(location.search).get("card")) || 1);
+
+  // Test hook for the draft checks.
+  window.__bb = { press, release, step, newGame, start, RULES, get game() { return game; } };
+  const jump = Number(new URLSearchParams(location.search).get("round")) || 1;
+  newGame(jump);
+  if (jump > 1) start();
   requestAnimationFrame(frame);
-  document.getElementById("restart").onclick = () => reset(1);
-  document.getElementById("jump").onclick = () => reset(10);
+  document.getElementById("restart").onclick = () => newGame(1);
+  document.getElementById("jump6").onclick = () => { newGame(6); start(); };
+  document.getElementById("jump16").onclick = () => { newGame(16); start(); };
+  document.getElementById("mute").onclick = toggleMute;
 })();
 </script>
 </body>
