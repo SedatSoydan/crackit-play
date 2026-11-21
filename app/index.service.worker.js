@@ -4,7 +4,7 @@
 // Incrementing CACHE_VERSION will kick off the install event and force
 // previously cached resources to be updated from the network.
 /** @type {string} */
-const CACHE_VERSION = '1795266022|29004765';
+const CACHE_VERSION = '1795274670|11947569';
 /** @type {string} */
 const CACHE_PREFIX = 'Crackit-sw-cache-';
 const CACHE_NAME = CACHE_PREFIX + CACHE_VERSION;
