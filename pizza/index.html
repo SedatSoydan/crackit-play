@@ -4,18 +4,18 @@
 <meta charset="utf-8">
 <meta name="robots" content="noindex, nofollow">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pizza Pronto draft</title>
+<title>Pizza Pronto draft 2</title>
 <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
   :root { --bg: #14172b; --text: #f4f1ec; --muted: #9ba3be; --accent: #ffb23e; }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, sans-serif; }
-  main { max-width: 900px; margin: 0 auto; padding: 24px 16px 48px; }
-  .intro { max-width: 580px; margin: 0 auto 20px; }
-  .intro h1 { margin: 0 0 6px; font-size: 24px; }
-  .intro li { color: var(--muted); margin: 0 0 6px; }
+  main { max-width: 900px; margin: 0 auto; padding: 20px 12px 40px; }
+  .intro { max-width: 580px; margin: 0 auto 16px; }
+  .intro h1 { margin: 0 0 6px; font-size: 22px; }
+  .intro li { color: var(--muted); margin: 0 0 4px; font-size: 15px; }
   .intro ul { padding-left: 18px; margin: 6px 0 0; }
-  .phone { width: 360px; max-width: 100%; margin: 0 auto; border-radius: 30px; overflow: hidden; box-shadow: 0 0 0 8px #000; touch-action: manipulation; user-select: none; }
+  .phone { width: min(360px, 100%, calc((100vh - 40px) * 0.5625)); margin: 0 auto; border-radius: 30px; overflow: hidden; box-shadow: 0 0 0 8px #000; touch-action: manipulation; user-select: none; }
   canvas { display: block; width: 100%; height: auto; cursor: pointer; }
   .row { display: flex; gap: 10px; justify-content: center; margin-top: 14px; flex-wrap: wrap; }
   button { font: 600 16px Fredoka, sans-serif; border: 0; border-radius: 14px; padding: 8px 16px; background: #2b3157; color: var(--text); cursor: pointer; }
@@ -24,12 +24,11 @@
 <body>
 <main>
   <div class="intro">
-    <h1>Pizza Pronto · taslak</h1>
+    <h1>Pizza Pronto · taslak 2</h1>
     <ul>
-      <li>Müşteri siparişini gösterir; ezberle, sonra <b>Ready</b> (ya da süre bitsin).</li>
-      <li>Fiş kapanır. Alttan bir malzeme seç, pizzaya dokunarak koy. Koyduğun bir malzemeye dokunursan kalkar.</li>
-      <li><b>Serve</b>: doğruysa müşteri sevinir; yanlışsa bir can gider ve fiş ne eksik ne fazla gösterir.</li>
-      <li>Seviyeler: 1–2 iki malzeme · 3–4 üç malzeme · 5–6 <b>yarım pizza</b> (malzeme sol ya da sağ yarıya) · 7+ dört malzeme ve yarımlar. 3 can.</li>
+      <li>Sipariş ortada büyük bir kartla gelir: ezberle, <b>Ready</b> de (ya da süre bitsin). Kart askıya asılır ve ters döner.</li>
+      <li>Alttan malzeme seç, pizzaya dokunarak koy; koyduğuna dokunursan kalkar. <b>Serve</b> ile servis et.</li>
+      <li>Seviyeler: 1–2 iki malzeme · 3–4 üç malzeme · 5–6 <b>yarım pizza</b> · 7+ dört malzeme ve yarımlar. 3 can.</li>
     </ul>
   </div>
   <div class="phone"><canvas id="board" width="360" height="640"></canvas></div>
@@ -38,248 +37,269 @@
 <script>
 (() => {
   const W = 360, H = 640, TAU = Math.PI * 2;
-  const TOPPINGS = [
-    { id: "pepperoni", name: "Pepperoni" },
-    { id: "mushroom", name: "Mushroom" },
-    { id: "olive", name: "Olive" },
-    { id: "pepper", name: "Pepper" },
-    { id: "pineapple", name: "Pineapple" },
-    { id: "onion", name: "Onion" },
-  ];
-  const PIZZA = { x: 180, y: 330, r: 118 };
-  const TRAY_Y = 520;
+  const TOPPINGS = ["pepperoni", "mushroom", "olive", "pepper", "pineapple", "onion"];
+  const PIZZA = { x: 180, y: 352, r: 116 };
+  const TRAY_Y = 528;
+  const INK = "#4a2a14";
 
+  // --- Kit -----------------------------------------------------------------------------
   function dot(c, x, y, r, f) { c.beginPath(); c.arc(x, y, r, 0, TAU); c.fillStyle = f; c.fill(); }
   function rr(c, x, y, w, h, r) { c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); }
   function lin(c, x0, y0, x1, y1, st) { const g = c.createLinearGradient(x0, y0, x1, y1); st.forEach(([o, col]) => g.addColorStop(o, col)); return g; }
   function rad(c, x, y, r0, r1, st) { const g = c.createRadialGradient(x, y, r0, x, y, r1); st.forEach(([o, col]) => g.addColorStop(o, col)); return g; }
+  function stroke(c, w, col) { c.lineWidth = w; c.strokeStyle = col; c.stroke(); }
 
-  // --- Toppings, drawn at a size and a turn -------------------------------------------
+  // --- Toppings: sticker style, dark outline, a highlight -------------------------------------
   function topping(c, id, x, y, s, rot) {
-    c.save(); c.translate(x, y); c.rotate(rot || 0); c.scale(s / 20, s / 20);
+    c.save(); c.translate(x, y); c.rotate(rot || 0); c.scale(s / 24, s / 24);
+    c.lineJoin = "round"; c.lineCap = "round";
     if (id === "pepperoni") {
-      dot(c, 0, 1.5, 10, "rgba(0,0,0,0.2)");
-      c.beginPath(); c.arc(0, 0, 10, 0, TAU); c.fillStyle = rad(c, -3, -3, 1, 11, [[0, "#e8553f"], [1, "#a8231a"]]); c.fill();
-      for (const [dx, dy] of [[-4, -3], [3, -4], [4, 3], [-2, 4], [0, 0]]) dot(c, dx, dy, 1.4, "rgba(255,220,200,0.55)");
+      dot(c, 1, 2, 11, "rgba(0,0,0,0.22)");
+      c.beginPath(); c.arc(0, 0, 11, 0, TAU); c.fillStyle = rad(c, -4, -4, 1, 12, [[0, "#f0624a"], [1, "#b3261c"]]); c.fill(); stroke(c, 1.6, "#6e130c");
+      for (const [dx, dy, r] of [[-5, -3, 1.6], [3, -5, 1.3], [5, 3, 1.7], [-2, 5, 1.4], [0, 0, 1.2], [-6, 3, 1]]) dot(c, dx, dy, r, "rgba(255,215,190,0.6)");
+      c.beginPath(); c.arc(-3, -4, 4, Math.PI, Math.PI * 1.6); stroke(c, 1.6, "rgba(255,255,255,0.45)");
     } else if (id === "mushroom") {
-      c.beginPath(); c.moveTo(-10, 0); c.quadraticCurveTo(-10, -11, 0, -11); c.quadraticCurveTo(10, -11, 10, 0); c.closePath(); c.fillStyle = "#c9a27e"; c.fill();
-      c.beginPath(); c.moveTo(-4, 0); c.lineTo(-3, 9); c.lineTo(3, 9); c.lineTo(4, 0); c.closePath(); c.fillStyle = "#efe0c8"; c.fill();
-      c.strokeStyle = "#8a6a4a"; c.lineWidth = 1.2; c.beginPath(); c.moveTo(-10, 0); c.lineTo(10, 0); c.stroke();
-      c.beginPath(); c.moveTo(-6, -6); c.quadraticCurveTo(0, -9, 6, -6); c.strokeStyle = "rgba(255,255,255,0.4)"; c.stroke();
+      dot(c, 1, 3, 10, "rgba(0,0,0,0.2)");
+      c.beginPath(); c.moveTo(-11, 1); c.bezierCurveTo(-11, -12, 11, -12, 11, 1); c.quadraticCurveTo(0, 3, -11, 1); c.closePath();
+      c.fillStyle = lin(c, 0, -10, 0, 2, [[0, "#d9b48e"], [1, "#b88c63"]]); c.fill(); stroke(c, 1.6, "#6b4a2a");
+      c.beginPath(); c.moveTo(-4, 1); c.lineTo(-3.5, 10); c.quadraticCurveTo(0, 12, 3.5, 10); c.lineTo(4, 1); c.closePath(); c.fillStyle = "#f6ead6"; c.fill(); stroke(c, 1.6, "#6b4a2a");
+      c.beginPath(); c.moveTo(-7, -5); c.quadraticCurveTo(-2, -9, 4, -7); stroke(c, 1.6, "rgba(255,255,255,0.5)");
     } else if (id === "olive") {
-      c.beginPath(); c.ellipse(0, 0, 8, 7, 0, 0, TAU); c.fillStyle = "#2a2a2e"; c.fill();
-      c.beginPath(); c.ellipse(0, 0, 3.5, 3, 0, 0, TAU); c.fillStyle = "#c94a3a"; c.fill();
-      c.beginPath(); c.arc(-3, -3, 2, 0, TAU); c.fillStyle = "rgba(255,255,255,0.35)"; c.fill();
+      dot(c, 1, 2, 9, "rgba(0,0,0,0.22)");
+      c.beginPath(); c.ellipse(0, 0, 9, 8, 0, 0, TAU); c.fillStyle = rad(c, -3, -3, 1, 10, [[0, "#4b4b52"], [1, "#1e1e22"]]); c.fill(); stroke(c, 1.4, "#0a0a0c");
+      c.beginPath(); c.ellipse(0, 0, 3.5, 3, 0, 0, TAU); c.fillStyle = "#e0b24a"; c.fill();
+      c.beginPath(); c.arc(-3, -3, 3, Math.PI, Math.PI * 1.7); stroke(c, 1.6, "rgba(255,255,255,0.45)");
     } else if (id === "pepper") {
-      c.strokeStyle = "#2f9e44"; c.lineWidth = 4.5; c.lineCap = "round";
-      c.beginPath(); c.arc(0, 4, 9, Math.PI * 1.1, Math.PI * 1.9); c.stroke();
-      c.strokeStyle = "rgba(255,255,255,0.35)"; c.lineWidth = 1.2; c.beginPath(); c.arc(0, 4, 9, Math.PI * 1.2, Math.PI * 1.6); c.stroke();
+      c.beginPath(); c.ellipse(1, 2, 10, 8, 0, 0, TAU); stroke(c, 5, "rgba(0,0,0,0.18)");
+      c.beginPath(); c.ellipse(0, 0, 10, 8, 0.3, 0, TAU); stroke(c, 6, "#1f6e2e"); stroke(c, 4, "#3fae4f");
+      c.beginPath(); c.ellipse(0, 0, 10, 8, 0.3, Math.PI * 1.1, Math.PI * 1.5); stroke(c, 1.4, "rgba(255,255,255,0.6)");
     } else if (id === "pineapple") {
-      c.beginPath(); c.moveTo(-8, 7); c.lineTo(8, 7); c.lineTo(5, -8); c.lineTo(-5, -8); c.closePath(); c.fillStyle = lin(c, 0, -8, 0, 7, [[0, "#fff09a"], [1, "#f0b400"]]); c.fill();
-      c.strokeStyle = "#c48a00"; c.lineWidth = 1; c.stroke();
+      dot(c, 1, 2, 9, "rgba(0,0,0,0.18)");
+      c.beginPath(); c.moveTo(-9, 8); c.lineTo(9, 8); c.lineTo(6, -8); c.quadraticCurveTo(0, -11, -6, -8); c.closePath();
+      c.fillStyle = lin(c, 0, -9, 0, 8, [[0, "#fff3a8"], [1, "#f2b705"]]); c.fill(); stroke(c, 1.6, "#a87800");
+      c.beginPath(); c.moveTo(-4, -4); c.lineTo(-2, 5); c.moveTo(2, -5); c.lineTo(3, 5); stroke(c, 1.1, "rgba(168,120,0,0.6)");
     } else if (id === "onion") {
-      c.strokeStyle = "#9b4fbf"; c.lineWidth = 2.6; c.beginPath(); c.arc(0, 0, 8, 0, TAU); c.stroke();
-      c.strokeStyle = "#d9a8ee"; c.lineWidth = 1.4; c.beginPath(); c.arc(0, 0, 5, 0, TAU); c.stroke();
+      c.beginPath(); c.arc(1, 2, 10, 0, TAU); stroke(c, 4, "rgba(0,0,0,0.15)");
+      c.beginPath(); c.arc(0, 0, 10, 0, TAU); stroke(c, 5, "#7d3b9e"); stroke(c, 3, "#b56ad9");
+      c.beginPath(); c.arc(0, 0, 5.5, 0, TAU); stroke(c, 2.4, "#e3b7f2");
+      c.beginPath(); c.arc(0, 0, 10, Math.PI * 1.1, Math.PI * 1.45); stroke(c, 1.4, "rgba(255,255,255,0.6)");
     }
     c.restore();
   }
 
-  // --- Levels and orders ---------------------------------------------------------------
-  function levelSpec(level) {
-    return {
-      kinds: level <= 2 ? 2 : level <= 4 ? 3 : level <= 6 ? 3 : 4,
-      most: level <= 2 ? 3 : 4,
-      halves: level >= 5,
-      memorize: Math.max(3.5, 7 - level * 0.35),
-    };
-  }
+  // --- Levels and orders ------------------------------------------------------------------
+  const levelSpec = (level) => ({ kinds: level <= 2 ? 2 : level <= 6 ? 3 : 4, most: level <= 2 ? 3 : 4, halves: level >= 5, memorize: Math.max(4, 8 - level * 0.4) });
   function makeOrder(level) {
     const spec = levelSpec(level);
-    const pool = TOPPINGS.map((t) => t.id).sort(() => Math.random() - 0.5).slice(0, spec.kinds);
-    return pool.map((id) => {
-      const side = spec.halves && Math.random() < 0.55 ? (Math.random() < 0.5 ? "left" : "right") : "all";
-      return { id, count: 1 + Math.floor(Math.random() * spec.most), side };
-    });
+    return TOPPINGS.slice().sort(() => Math.random() - 0.5).slice(0, spec.kinds).map((id) => ({
+      id, count: 1 + Math.floor(Math.random() * spec.most),
+      side: spec.halves && Math.random() < 0.55 ? (Math.random() < 0.5 ? "left" : "right") : "all",
+    }));
   }
-  // What the pizza has: count per topping and side ("all" counts both halves).
-  function tally(placed) {
-    const out = {};
-    for (const p of placed) {
-      const key = p.id;
-      out[key] = out[key] || { all: 0, left: 0, right: 0 };
-      out[key].all++;
-      out[key][p.x < PIZZA.x ? "left" : "right"]++;
-    }
-    return out;
-  }
-  // Each order line checked against the pizza: [{line, have, ok}], and extras.
   function check(order, placed) {
-    const t = tally(placed);
+    const t = {};
+    for (const p of placed) { t[p.id] = t[p.id] || { all: 0, left: 0, right: 0 }; t[p.id].all++; t[p.id][p.x < PIZZA.x ? "left" : "right"]++; }
     const lines = order.map((line) => {
       const got = t[line.id] || { all: 0, left: 0, right: 0 };
-      let ok = got.all === line.count;
-      if (line.side !== "all") ok = ok && got[line.side] === line.count;
-      return { line, have: got.all, ok };
+      const ok = got.all === line.count && (line.side === "all" || got[line.side] === line.count);
+      return { line, have: line.side === "all" ? got.all : got[line.side], wrongSide: line.side !== "all" && got.all === line.count && got[line.side] !== line.count, ok };
     });
     const asked = new Set(order.map((l) => l.id));
     const extras = Object.keys(t).filter((id) => !asked.has(id));
     return { lines, extras, ok: lines.every((l) => l.ok) && extras.length === 0 };
   }
 
-  // --- State ------------------------------------------------------------------------------
+  // --- State ---------------------------------------------------------------------------------
   const canvas = document.getElementById("board");
   const c = canvas.getContext("2d");
   const dpr = Math.min(window.devicePixelRatio || 1, 3);
   canvas.width = W * dpr; canvas.height = H * dpr;
-  let level, lives, score, streak, order, placed, phase, timer, chosen, verdict, t = 0, last = performance.now();
-  const BTN = { ready: [110, 584, 140, 44], serve: [110, 584, 140, 44] };
-  const trayX = (i) => 32 + i * 59;
+  let level, lives, score, streak, order, placed, phase, timer, chosen, verdict, fly, t = 0, last = performance.now();
+  const BTN = { ready: [110, 470, 140, 50], serve: [120, 580, 120, 46] };
+  const trayX = (i) => 20 + i * 55;
 
   function reset(start) { level = start || 1; lives = 3; score = 0; streak = 0; newOrder(); }
-  function newOrder() {
-    order = makeOrder(level); placed = []; phase = "memorize"; timer = levelSpec(level).memorize; chosen = 0; verdict = null;
-  }
+  function newOrder() { order = makeOrder(level); placed = []; phase = "memorize"; timer = levelSpec(level).memorize; chosen = 0; verdict = null; fly = 0; }
   const inside = (x, y, [bx, by, bw, bh]) => x >= bx && x <= bx + bw && y >= by && y <= by + bh;
 
   canvas.addEventListener("pointerdown", (ev) => {
     const r = canvas.getBoundingClientRect();
     const x = (ev.clientX - r.left) * W / r.width, y = (ev.clientY - r.top) * H / r.height;
     if (phase === "over") { reset(1); return; }
-    if (phase === "memorize") { if (inside(x, y, BTN.ready)) { phase = "build"; } return; }
-    if (phase === "result") {
-      if (verdict.ok) { level++; }
-      if (lives <= 0) { phase = "over"; return; }
-      newOrder(); return;
-    }
-    if (phase !== "build") return;
+    if (phase === "memorize") { if (inside(x, y, BTN.ready)) { phase = "fly"; fly = 0; } return; }
+    if (phase === "fly") return;
+    if (phase === "result") { if (verdict.ok) level++; if (lives <= 0) { phase = "over"; return; } newOrder(); return; }
     if (inside(x, y, BTN.serve)) {
       verdict = check(order, placed);
       if (verdict.ok) { streak++; score += 10 * level + 5 * Math.min(streak, 10); } else { streak = 0; lives--; }
       phase = "result"; return;
     }
-    for (let i = 0; i < TOPPINGS.length; i++) if (Math.hypot(x - trayX(i) - 23, y - TRAY_Y) < 27) { chosen = i; return; }
-    // A tap on a placed topping takes it off; elsewhere on the pizza adds the chosen one.
-    const d = Math.hypot(x - PIZZA.x, y - PIZZA.y);
-    if (d < PIZZA.r - 8) {
-      const hit = placed.findIndex((p) => Math.hypot(p.x - x, p.y - y) < 14);
-      if (hit >= 0) placed.splice(hit, 1);
-      else placed.push({ id: TOPPINGS[chosen].id, x, y, rot: Math.random() * TAU, pop: 0 });
+    for (let i = 0; i < TOPPINGS.length; i++) if (Math.abs(x - trayX(i) - 24) < 26 && Math.abs(y - TRAY_Y) < 28) { chosen = i; return; }
+    if (Math.hypot(x - PIZZA.x, y - PIZZA.y) < PIZZA.r - 10) {
+      const hit = placed.findIndex((p) => Math.hypot(p.x - x, p.y - y) < 15);
+      if (hit >= 0) placed.splice(hit, 1); else placed.push({ id: TOPPINGS[chosen], x, y, rot: Math.random() * TAU, pop: 0 });
     }
   });
 
   function step(dt) {
-    for (const p of placed) p.pop = Math.min(1, (p.pop || 0) + dt * 6);
-    if (phase === "memorize") { timer -= dt; if (timer <= 0) phase = "build"; }
+    for (const p of placed) p.pop = Math.min(1, p.pop + dt * 6);
+    if (phase === "memorize") { timer -= dt; if (timer <= 0) { phase = "fly"; fly = 0; } }
+    if (phase === "fly") { fly += dt / 0.5; if (fly >= 1) phase = "build"; }
   }
 
-  // --- Drawing -------------------------------------------------------------------------------
+  // --- Scene -------------------------------------------------------------------------------------
+  const bricks = [];
+  for (let row = 0; row < 9; row++) for (let col = -1; col < 13; col++) bricks.push({ x: col * 32 + (row % 2) * 16, y: 60 + row * 16, tone: (row * 7 + col * 3) % 5 });
   function drawKitchen() {
-    c.fillStyle = lin(c, 0, 0, 0, H, [[0, "#f6e7cf"], [1, "#ead2ad"]]); c.fillRect(0, 0, W, H);
-    // Tiled wall and a wooden counter.
-    c.strokeStyle = "rgba(180,140,90,0.25)"; c.lineWidth = 1;
-    for (let y = 0; y < 200; y += 24) for (let x = (y / 24) % 2 ? 0 : 12; x < W; x += 24) { c.strokeRect(x, y, 24, 24); }
-    c.fillStyle = lin(c, 0, 200, 0, 470, [[0, "#c9874a"], [1, "#a96a34"]]); c.fillRect(0, 200, W, 270);
-    c.strokeStyle = "rgba(90,45,15,0.25)"; for (let y = 214; y < 470; y += 18) { c.beginPath(); c.moveTo(0, y); c.bezierCurveTo(120, y + 5, 240, y - 5, W, y + 3); c.stroke(); }
-    c.fillStyle = lin(c, 0, 470, 0, H, [[0, "#8a4f22"], [1, "#6a3a18"]]); c.fillRect(0, 470, W, H - 470);
+    c.fillStyle = lin(c, 0, 0, 0, 220, [[0, "#7a3b28"], [1, "#5e2c1e"]]); c.fillRect(0, 0, W, 222);
+    for (const b of bricks) { rr(c, b.x + 1, b.y + 1, 30, 14, 2); c.fillStyle = ["#a24a33", "#9a4430", "#ab5138", "#934029", "#a84d35"][b.tone]; c.fill(); }
+    // The oven arch with its fire.
+    const ox = 186, oy = 150;
+    c.beginPath(); c.arc(ox, oy + 30, 48, Math.PI, TAU); c.lineTo(ox + 48, oy + 72); c.lineTo(ox - 48, oy + 72); c.closePath(); c.fillStyle = "#4a2418"; c.fill();
+    c.beginPath(); c.arc(ox, oy + 36, 34, Math.PI, TAU); c.lineTo(ox + 34, oy + 72); c.lineTo(ox - 34, oy + 72); c.closePath(); c.fillStyle = "#1e0d08"; c.fill();
+    const flick = 0.85 + Math.sin(t * 9) * 0.08 + Math.sin(t * 13) * 0.05;
+    c.fillStyle = rad(c, ox, oy + 68, 4, 38 * flick, [[0, "rgba(255,240,170,0.95)"], [0.4, "rgba(255,150,40,0.85)"], [1, "rgba(255,80,20,0)"]]); c.fillRect(ox - 34, oy + 30, 68, 42);
+    for (let i = 0; i < 3; i++) dot(c, ox - 14 + i * 14, oy + 70, 4, "#3a1a0c");
+    // Marble counter.
+    c.fillStyle = lin(c, 0, 222, 0, 470, [[0, "#f3efe8"], [1, "#ddd6cb"]]); c.fillRect(0, 222, W, 260);
+    c.strokeStyle = "rgba(150,140,130,0.25)"; c.lineWidth = 1.4;
+    for (let i = 0; i < 7; i++) { c.beginPath(); c.moveTo(-20, 240 + i * 36); c.bezierCurveTo(90, 220 + i * 40, 200, 280 + i * 30, 380, 250 + i * 34); c.stroke(); }
+    c.fillStyle = "#c9bfae"; c.fillRect(0, 222, W, 5);
+    // Wooden tray shelf.
+    c.fillStyle = lin(c, 0, 482, 0, H, [[0, "#9c6233"], [1, "#6f4120"]]); c.fillRect(0, 482, W, H - 482);
+    c.strokeStyle = "rgba(60,30,10,0.25)"; for (let y = 494; y < H; y += 16) { c.beginPath(); c.moveTo(0, y); c.bezierCurveTo(120, y + 4, 240, y - 4, W, y + 2); c.stroke(); }
   }
-  function drawPizza(dim) {
-    dot(c, PIZZA.x + 4, PIZZA.y + 8, PIZZA.r + 6, "rgba(60,30,10,0.3)");
-    dot(c, PIZZA.x, PIZZA.y, PIZZA.r + 6, "#e6e1d6");
-    c.fillStyle = rad(c, PIZZA.x, PIZZA.y, PIZZA.r * 0.7, PIZZA.r, [[0, "#e8a85a"], [1, "#b86e2c"]]); dot(c, PIZZA.x, PIZZA.y, PIZZA.r, c.fillStyle);
-    dot(c, PIZZA.x, PIZZA.y, PIZZA.r - 12, "#d8442c");
-    for (let i = 0; i < 18; i++) {
-      const a = i * 2.4, rr2 = (i * 37) % (PIZZA.r - 30);
-      c.beginPath(); c.ellipse(PIZZA.x + Math.cos(a) * rr2, PIZZA.y + Math.sin(a) * rr2, 18, 12, a, 0, TAU); c.fillStyle = "rgba(255,226,150,0.85)"; c.fill();
+  function drawBear(mood) {
+    const x = 270, y = 112 + Math.sin(t * 2) * 1.5;
+    dot(c, x - 26, y - 26, 12, "#8a5a32"); dot(c, x + 26, y - 26, 12, "#8a5a32");
+    dot(c, x - 26, y - 26, 6, "#d9a679"); dot(c, x + 26, y - 26, 6, "#d9a679");
+    dot(c, x, y + 60, 40, "#4f7bd6");
+    c.beginPath(); c.arc(x, y + 60, 40, Math.PI * 1.15, Math.PI * 1.85); stroke(c, 6, "#3a63bd");
+    dot(c, x, y, 32, "#a8703f");
+    c.beginPath(); c.ellipse(x, y + 10, 16, 12, 0, 0, TAU); c.fillStyle = "#e0b48a"; c.fill();
+    const blink = (t % 3.2) < 0.12 && mood === "wait";
+    if (blink) { c.beginPath(); c.moveTo(x - 15, y - 6); c.lineTo(x - 7, y - 6); c.moveTo(x + 7, y - 6); c.lineTo(x + 15, y - 6); stroke(c, 2.5, INK); }
+    else { dot(c, x - 11, y - 6, 4, INK); dot(c, x + 11, y - 6, 4, INK); dot(c, x - 10, y - 7.5, 1.4, "#fff"); dot(c, x + 12, y - 7.5, 1.4, "#fff"); }
+    c.beginPath(); c.ellipse(x, y + 5, 5, 3.5, 0, 0, TAU); c.fillStyle = INK; c.fill();
+    c.beginPath(); c.lineCap = "round";
+    if (mood === "happy") c.arc(x, y + 10, 8, 0.15 * Math.PI, 0.85 * Math.PI);
+    else if (mood === "sad") c.arc(x, y + 21, 7, 1.2 * Math.PI, 1.8 * Math.PI);
+    else { c.moveTo(x - 4, y + 14); c.quadraticCurveTo(x, y + 16, x + 4, y + 14); }
+    stroke(c, 2.5, INK);
+    dot(c, x - 22, y + 8, 5, "rgba(255,120,120,0.45)"); dot(c, x + 22, y + 8, 5, "rgba(255,120,120,0.45)");
+    if (mood === "happy") for (let i = 0; i < 3; i++) { const a = t * 2 + i * 2.1; drawHeart(x + Math.cos(a) * 46, y - 30 + Math.sin(a * 1.3) * 8, 6); }
+  }
+  function drawHeart(x, y, s) {
+    c.beginPath(); for (let i = 0; i < 30; i++) { const k = i * TAU / 30; c.lineTo(x + 16 * Math.pow(Math.sin(k), 3) * s / 16, y - (13 * Math.cos(k) - 5 * Math.cos(2 * k) - 2 * Math.cos(3 * k) - Math.cos(4 * k)) * s / 16); }
+    c.closePath(); c.fillStyle = "#ff5d73"; c.fill();
+  }
+  function drawPizza() {
+    const { x, y, r } = PIZZA;
+    c.beginPath(); c.ellipse(x + 4, y + 10, r + 12, r + 8, 0, 0, TAU); c.fillStyle = "rgba(60,40,20,0.22)"; c.fill();
+    dot(c, x, y, r + 12, lin(c, x, y - r, x, y + r, [[0, "#c9b79c"], [1, "#a8957a"]]));
+    dot(c, x, y, r + 6, "#e9e2d4");
+    dot(c, x, y, r, rad(c, x - 20, y - 30, r * 0.5, r, [[0, "#f3b765"], [0.85, "#d98d3f"], [1, "#b46a28"]]));
+    for (let i = 0; i < 22; i++) { const a = i * 0.29 + 0.1, d = r - 7; dot(c, x + Math.cos(a * 1.7) * d, y + Math.sin(a * 1.7) * d, 2.4 + (i % 3), "rgba(120,60,20,0.45)"); }
+    dot(c, x, y, r - 13, "#c9361f");
+    // Melted cheese with a wavy edge and a few bubbles.
+    c.beginPath();
+    for (let i = 0; i <= 60; i++) { const a = i * TAU / 60, d = r - 22 + Math.sin(a * 7) * 5 + Math.sin(a * 3 + 1) * 4; c.lineTo(x + Math.cos(a) * d, y + Math.sin(a) * d); }
+    c.closePath(); c.fillStyle = rad(c, x - 25, y - 25, 10, r, [[0, "#fff1b8"], [1, "#f6cf6a"]]); c.fill();
+    for (const [dx, dy, br] of [[-40, -30, 7], [30, -45, 5], [45, 20, 8], [-20, 45, 6], [-55, 10, 5], [10, 5, 4], [20, 55, 5]]) {
+      dot(c, x + dx, y + dy, br, "rgba(230,160,60,0.45)"); dot(c, x + dx - br * 0.3, y + dy - br * 0.3, br * 0.4, "rgba(255,255,255,0.5)");
     }
     if (levelSpec(level).halves) {
-      c.setLineDash([6, 6]); c.strokeStyle = "rgba(255,255,255,0.65)"; c.lineWidth = 2;
-      c.beginPath(); c.moveTo(PIZZA.x, PIZZA.y - PIZZA.r + 6); c.lineTo(PIZZA.x, PIZZA.y + PIZZA.r - 6); c.stroke(); c.setLineDash([]);
-      c.fillStyle = "rgba(90,40,10,0.7)"; c.font = "700 13px Fredoka, sans-serif"; c.textAlign = "center";
-      c.fillText("LEFT", PIZZA.x - 60, PIZZA.y + PIZZA.r + 22); c.fillText("RIGHT", PIZZA.x + 60, PIZZA.y + PIZZA.r + 22);
+      c.setLineDash([7, 6]); c.beginPath(); c.moveTo(x, y - r + 4); c.lineTo(x, y + r - 4); stroke(c, 3, "rgba(255,255,255,0.85)"); c.setLineDash([]);
+      for (const [label, lx] of [["LEFT", x - 62], ["RIGHT", x + 62]]) { rr(c, lx - 28, y + r + 14, 56, 20, 10); c.fillStyle = "rgba(74,42,20,0.75)"; c.fill(); c.fillStyle = "#fff"; c.font = "700 12px Fredoka, sans-serif"; c.textAlign = "center"; c.fillText(label, lx, y + r + 28); }
     }
-    for (const p of placed) topping(c, p.id, p.x, p.y, 22 * (0.6 + 0.4 * (p.pop || 0)), p.rot);
-    if (dim) { dot(c, PIZZA.x, PIZZA.y, PIZZA.r + 7, "rgba(40,20,5,0.55)"); }
+    for (const p of placed) topping(c, p.id, p.x, p.y, 26 * (0.5 + 0.5 * Math.min(1, p.pop * 1.3)), p.rot);
   }
-  function drawTicket(x, y, w, open, result) {
-    c.save();
-    rr(c, x + 3, y + 5, w, 26 + order.length * 34, 10); c.fillStyle = "rgba(60,30,10,0.25)"; c.fill();
-    rr(c, x, y, w, 26 + order.length * 34, 10); c.fillStyle = "#fffdf6"; c.fill();
-    c.fillStyle = "#c0392b"; c.fillRect(x, y, w, 6);
-    c.fillStyle = "#5a3a20"; c.font = "700 14px Fredoka, sans-serif"; c.textAlign = "left"; c.fillText("ORDER", x + 12, y + 22);
-    order.forEach((line, i) => {
-      const ly = y + 44 + i * 34;
-      if (!open) { rr(c, x + 12, ly - 12, w - 24, 22, 6); c.fillStyle = "#efe6d4"; c.fill(); return; }
-      topping(c, line.id, x + 28, ly - 2, 30, 0.4);
-      c.fillStyle = "#3a2410"; c.font = "700 18px Fredoka, sans-serif"; c.textAlign = "left";
-      c.fillText(`× ${line.count}`, x + 50, ly + 5);
-      if (line.side !== "all") { rr(c, x + 92, ly - 11, 54, 20, 10); c.fillStyle = "#5a3a20"; c.fill(); c.fillStyle = "#fff"; c.font = "700 12px Fredoka, sans-serif"; c.textAlign = "center"; c.fillText(line.side.toUpperCase(), x + 119, ly + 3); }
-      if (result) {
-        const r = result.lines[i];
-        c.font = "700 14px Fredoka, sans-serif"; c.textAlign = "right"; c.fillStyle = r.ok ? "#2f9e44" : "#c0392b";
-        c.fillText(r.ok ? "✓" : `you: ${r.have}`, x + w - 10, ly + 4);
-      }
-    });
+  // The order card: big in the middle while memorizing; then it flies to the rail
+  // and flips; at the result it flips back with marks.
+  function drawCard(cx, cy, scale, face, result) {
+    const w = 240, lineH = 46, h = 66 + order.length * lineH;
+    c.save(); c.translate(cx, cy); c.scale(scale, scale);
+    rr(c, -w / 2 + 4, -h / 2 + 6, w, h, 14); c.fillStyle = "rgba(40,20,5,0.3)"; c.fill();
+    rr(c, -w / 2, -h / 2, w, h, 14); c.fillStyle = "#fffdf5"; c.fill();
+    c.fillStyle = "#d8442c"; rr(c, -w / 2, -h / 2, w, 12, 6); c.fill();
+    if (face) {
+      c.fillStyle = INK; c.font = "700 20px Fredoka, sans-serif"; c.textAlign = "center"; c.fillText("ORDER", 0, -h / 2 + 40);
+      order.forEach((line, i) => {
+        const ly = -h / 2 + 76 + i * lineH;
+        rr(c, -w / 2 + 12, ly - 20, w - 24, 40, 12); c.fillStyle = result ? (result.lines[i].ok ? "#e3f6e6" : "#fde2df") : "#f6efe2"; c.fill();
+        topping(c, line.id, -w / 2 + 40, ly, 32, 0.3);
+        c.fillStyle = INK; c.font = "700 26px Fredoka, sans-serif"; c.textAlign = "left"; c.fillText(`× ${line.count}`, -w / 2 + 64, ly + 9);
+        if (line.side !== "all") { rr(c, 2, ly - 13, 66, 26, 13); c.fillStyle = "#4a2a14"; c.fill(); c.fillStyle = "#fff"; c.font = "700 14px Fredoka, sans-serif"; c.textAlign = "center"; c.fillText(line.side.toUpperCase(), 35, ly + 5); }
+        if (result) { const rl = result.lines[i]; c.font = "700 16px Fredoka, sans-serif"; c.textAlign = "right"; c.fillStyle = rl.ok ? "#1f7a34" : "#b3261c"; c.fillText(rl.ok ? "✓" : rl.wrongSide ? "side!" : `you ${rl.have}`, w / 2 - 18, ly + 6); }
+      });
+    } else {
+      for (let i = 0; i < 6; i++) for (let j = 0; j < 3; j++) { c.fillStyle = "rgba(216,68,44,0.12)"; c.font = "700 28px Fredoka, sans-serif"; c.textAlign = "center"; c.fillText("?", -80 + j * 80, -h / 2 + 50 + i * 40); }
+      c.fillStyle = INK; c.font = "700 20px Fredoka, sans-serif"; c.textAlign = "center"; c.fillText("from memory!", 0, 8);
+    }
     c.restore();
   }
-  function drawCustomer(mood) {
-    // A round, friendly customer at the counter.
-    const x = 300, y = 120;
-    dot(c, x, y + 60, 40, "#5b7bd6");
-    dot(c, x, y, 34, "#ffd9b0");
-    dot(c, x - 11, y - 4, 3.5, "#3a2410"); dot(c, x + 11, y - 4, 3.5, "#3a2410");
-    c.strokeStyle = "#3a2410"; c.lineWidth = 3; c.lineCap = "round"; c.beginPath();
-    if (mood === "happy") c.arc(x, y + 8, 10, 0.15 * Math.PI, 0.85 * Math.PI);
-    else if (mood === "sad") c.arc(x, y + 20, 9, 1.2 * Math.PI, 1.8 * Math.PI);
-    else { c.moveTo(x - 8, y + 12); c.lineTo(x + 8, y + 12); }
-    c.stroke();
-    dot(c, x - 18, y + 8, 5, "rgba(255,120,120,0.4)"); dot(c, x + 18, y + 8, 5, "rgba(255,120,120,0.4)");
-    c.beginPath(); c.arc(x, y - 28, 22, Math.PI, TAU); c.fillStyle = "#3a2410"; c.fill();
-  }
-  function button(rect, label, face, edge) {
+  function button(rect, label, top, bottom, edge) {
     const [x, y, w, h] = rect;
-    rr(c, x, y + 5, w, h, 16); c.fillStyle = edge; c.fill();
-    rr(c, x, y, w, h, 16); c.fillStyle = face; c.fill();
-    c.fillStyle = "#fff"; c.font = "700 20px Fredoka, sans-serif"; c.textAlign = "center"; c.fillText(label, x + w / 2, y + 29);
+    rr(c, x, y + 5, w, h, 18); c.fillStyle = edge; c.fill();
+    rr(c, x, y, w, h, 18); c.fillStyle = lin(c, 0, y, 0, y + h, [[0, top], [1, bottom]]); c.fill();
+    rr(c, x + 6, y + 4, w - 12, h * 0.4, 12); c.fillStyle = "rgba(255,255,255,0.2)"; c.fill();
+    c.fillStyle = "#fff"; c.font = "700 22px Fredoka, sans-serif"; c.textAlign = "center"; c.fillText(label, x + w / 2, y + h / 2 + 8);
   }
 
   function draw() {
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
     drawKitchen();
     // HUD.
-    rr(c, 14, 14, 332, 36, 18); c.fillStyle = "rgba(90,45,15,0.18)"; c.fill();
-    c.font = "700 16px Fredoka, sans-serif"; c.fillStyle = "#5a3a20"; c.textAlign = "left"; c.fillText(`Level ${level}`, 28, 38);
-    c.textAlign = "center"; c.fillText("❤".repeat(Math.max(0, lives)), 180, 38);
-    c.textAlign = "right"; c.fillText(score, 332, 38);
-    const mood = phase === "result" ? (verdict.ok ? "happy" : "sad") : "wait";
-    drawCustomer(mood);
+    rr(c, 12, 12, 336, 38, 19); c.fillStyle = "rgba(30,12,6,0.45)"; c.fill();
+    c.font = "700 17px Fredoka, sans-serif"; c.fillStyle = "#fff4d6"; c.textAlign = "left"; c.fillText(`Level ${level}`, 26, 37);
+    for (let i = 0; i < 3; i++) drawHeart(162 + i * 20, 30, i < lives ? 8 : 0.01);
+    for (let i = lives; i < 3; i++) { c.beginPath(); c.arc(162 + i * 20, 30, 6, 0, TAU); stroke(c, 1.5, "rgba(255,255,255,0.35)"); }
+    c.textAlign = "right"; c.fillText(score, 334, 37);
+    drawBear(phase === "result" ? (verdict.ok ? "happy" : "sad") : "wait");
+    // The ticket rail.
+    c.fillStyle = "#8a8f98"; c.fillRect(14, 70, 170, 6); dot(c, 22, 73, 5, "#5d636d"); dot(c, 176, 73, 5, "#5d636d");
+    drawPizza();
+    // Tray of toppings in wooden bowls.
+    for (let i = 0; i < TOPPINGS.length; i++) {
+      const x = trayX(i) + 24, sel = i === chosen && phase === "build";
+      c.beginPath(); c.ellipse(x, TRAY_Y + 14, 24, 8, 0, 0, TAU); c.fillStyle = "rgba(30,15,5,0.35)"; c.fill();
+      c.beginPath(); c.ellipse(x, TRAY_Y, 25, 22, 0, 0, Math.PI); c.lineTo(x - 25, TRAY_Y); c.fillStyle = sel ? "#ffcf4a" : "#c98a4f"; c.fill(); stroke(c, 2, "#5e3517");
+      c.beginPath(); c.ellipse(x, TRAY_Y, 25, 8, 0, 0, TAU); c.fillStyle = sel ? "#fff0b0" : "#e7bd8a"; c.fill(); stroke(c, 2, "#5e3517");
+      topping(c, TOPPINGS[i], x - 7, TRAY_Y - 4, 22, 0.5); topping(c, TOPPINGS[i], x + 8, TRAY_Y - 1, 22, 2);
+      if (sel) { c.beginPath(); c.ellipse(x, TRAY_Y + 4, 30, 28, 0, 0, TAU); stroke(c, 3, "#ffd23f"); }
+    }
     if (phase === "memorize") {
-      drawTicket(24, 66, 220, true);
-      rr(c, 24, 66 + 30 + order.length * 34 + 4, 220, 8, 4); c.fillStyle = "rgba(90,45,15,0.2)"; c.fill();
-      rr(c, 24, 66 + 30 + order.length * 34 + 4, 220 * Math.max(0, timer / levelSpec(level).memorize), 8, 4); c.fillStyle = "#c0392b"; c.fill();
-      drawPizza(true);
-      c.fillStyle = "#fff4d6"; c.font = "700 20px Fredoka, sans-serif"; c.textAlign = "center"; c.fillText("Remember the order!", PIZZA.x, PIZZA.y + 6);
-      button(BTN.ready, "Ready", "#2f9e44", "#1e6b2d");
-    } else if (phase === "build" || phase === "result") {
-      drawTicket(24, 66, 220, phase === "result", phase === "result" ? verdict : null);
-      drawPizza(false);
-      // The topping tray.
-      for (let i = 0; i < TOPPINGS.length; i++) {
-        const x = trayX(i);
-        rr(c, x, TRAY_Y - 26, 46, 52, 12); c.fillStyle = i === chosen && phase === "build" ? "#ffd23f" : "#f6e7cf"; c.fill();
-        c.strokeStyle = "#5a3a20"; c.lineWidth = 2; c.stroke();
-        topping(c, TOPPINGS[i].id, x + 23, TRAY_Y - 2, 26, 0.3);
-      }
-      if (phase === "build") button(BTN.serve, "Serve", "#e8553f", "#a8231a");
+      c.fillStyle = "rgba(30,12,6,0.55)"; c.fillRect(0, 0, W, H);
+      drawCard(180, 270, 1, true, null);
+      const total = levelSpec(level).memorize;
+      rr(c, 70, 438, 220, 10, 5); c.fillStyle = "rgba(255,255,255,0.25)"; c.fill();
+      rr(c, 70, 438, 220 * Math.max(0, timer / total), 10, 5); c.fillStyle = "#ffd23f"; c.fill();
+      button(BTN.ready, "Ready", "#4fc76a", "#2f9e44", "#1e6b2d");
+    } else if (phase === "fly") {
+      const e = 1 - Math.pow(1 - Math.min(1, fly), 3);
+      const flip = Math.abs(Math.cos(e * Math.PI));
+      c.fillStyle = `rgba(30,12,6,${0.55 * (1 - e)})`; c.fillRect(0, 0, W, H);
+      c.save(); c.translate(180 + (96 - 180) * e, 270 + (140 - 270) * e); c.scale(1, Math.max(0.05, flip)); drawCard(0, 0, 1 - 0.55 * e, e < 0.5, null); c.restore();
+    } else {
+      const result = phase === "result" ? verdict : null;
+      drawCard(96, 140, 0.45, !!result, result);
+      if (phase === "build") button(BTN.serve, "Serve", "#ff7a5c", "#e0442a", "#9a2414");
       else {
-        c.font = "700 22px Fredoka, sans-serif"; c.textAlign = "center"; c.fillStyle = verdict.ok ? "#1e6b2d" : "#a8231a";
-        const extra = verdict.extras.length ? ` · no ${verdict.extras.join(", ")}` : "";
-        c.fillText(verdict.ok ? "Perfect pizza!" : "Not quite" + extra, 180, 600);
-        c.font = "600 14px Fredoka, sans-serif"; c.fillStyle = "#5a3a20"; c.fillText("tap to go on", 180, 622);
+        rr(c, 50, 572, 260, 58, 18); c.fillStyle = "rgba(30,12,6,0.6)"; c.fill();
+        c.font = "700 22px Fredoka, sans-serif"; c.textAlign = "center"; c.fillStyle = verdict.ok ? "#9cf0ae" : "#ff9a8a";
+        const extra = verdict.extras.length ? `  (no ${verdict.extras.join(", ")})` : "";
+        c.fillText(verdict.ok ? "Perfect pizza!" : "Not quite" + extra, 180, 598);
+        c.font = "600 13px Fredoka, sans-serif"; c.fillStyle = "#fff4d6"; c.fillText("tap to go on", 180, 618);
       }
-    } else if (phase === "over") {
-      c.fillStyle = "rgba(40,20,5,0.7)"; c.fillRect(0, 0, W, H);
-      c.fillStyle = "#fff4d6"; c.font = "700 30px Fredoka, sans-serif"; c.textAlign = "center"; c.fillText("Kitchen closed!", 180, 300);
-      c.font = "600 18px Fredoka, sans-serif"; c.fillText(`Level ${level} · score ${score}`, 180, 334); c.fillText("tap to cook again", 180, 366);
+    }
+    if (phase === "result" && !verdict.ok) {
+      // The open ticket, larger, so the player sees what went wrong.
+      drawCard(180, 270, 0.85, true, verdict);
+    }
+    if (phase === "over") {
+      c.fillStyle = "rgba(30,12,6,0.75)"; c.fillRect(0, 0, W, H);
+      c.fillStyle = "#fff4d6"; c.font = "700 32px Fredoka, sans-serif"; c.textAlign = "center"; c.fillText("Kitchen closed!", 180, 290);
+      c.font = "600 18px Fredoka, sans-serif"; c.fillText(`Level ${level} · score ${score}`, 180, 326); c.fillText("tap to cook again", 180, 358);
     }
   }
   function frame(now) {
