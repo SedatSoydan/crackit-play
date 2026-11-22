@@ -12,7 +12,7 @@ canvas{display:block;margin:0 auto}
 <body>
 <canvas id="c"></canvas>
 <script>
-// Secret Door, draft 2: the doorkeeper has a secret rule. Watch who gets in,
+// Secret Door, draft 3: the doorkeeper has a secret rule. Watch who gets in,
 // then call IN or OUT for each monster. Five right in a row cracks the rule.
 const W = 360, H = 640, LIVES = 3, STREAK = 5, KEEP = 6, HINT_AT = 2, SKIP_AT = 4;
 const DOOR_X = 180, FEET_Y = 508, BIG = 1.25, SMALL = .64;
@@ -258,7 +258,7 @@ function drawClub() {
   ctx.fillStyle = `rgba(255,220,245,${glow})`; ctx.font = '900 14px "Trebuchet MS", system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.fillText('MONSTER  CLUB', 180, 302);
   // The door with its frame.
   ctx.fillStyle = '#1c1433'; rrect(DOOR_X - 56, 328, 112, 182, 52); ctx.fill();
-  ctx.fillStyle = lin(DOOR_X - 48, 0, DOOR_X + 48, 0, [[0, '#2f8f8a'], [.5, '#46b5ad'], [1, '#2a7f7a']]); rrect(DOOR_X - 48, 336, 96, 172, 46); ctx.fill();
+  ctx.fillStyle = lin(DOOR_X - 48, 0, DOOR_X + 48, 0, [[0, '#3e3358'], [.5, '#544673'], [1, '#3a2f52']]); rrect(DOOR_X - 48, 336, 96, 172, 46); ctx.fill();
   ctx.strokeStyle = 'rgba(255,255,255,.18)'; ctx.lineWidth = 2; rrect(DOOR_X - 36, 352, 72, 70, 34); ctx.stroke(); rrect(DOOR_X - 36, 432, 72, 64, 10); ctx.stroke();
   ell(DOOR_X + 30, 440, 5, 5, '#ffd166'); ell(DOOR_X + 29, 439, 1.6, 1.6, '#fff');
   // Streak lights over the door: one lights per right call in a row.
@@ -281,7 +281,21 @@ function drawClub() {
   ctx.fillStyle = lin(0, 508, 0, 522, [[0, '#6a5a8a'], [1, '#4a3d6a']]); ctx.fillRect(0, 508, W, 14);
 }
 
+// A soft spotlight from the door lamp: a pale halo behind the monster and a
+// pool of light at its feet, so it stands out whatever its colour.
+function drawSpotlight() {
+  ctx.fillStyle = lin(0, 330, 0, FEET_Y, [[0, 'rgba(255,244,214,0)'], [1, 'rgba(255,244,214,.1)']]);
+  ctx.beginPath(); ctx.moveTo(DOOR_X - 14, 330); ctx.lineTo(DOOR_X + 14, 330); ctx.lineTo(DOOR_X + 70, FEET_Y); ctx.lineTo(DOOR_X - 70, FEET_Y); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = rad(DOOR_X, FEET_Y - 52, 70, [[0, 'rgba(255,248,230,.34)'], [.6, 'rgba(255,248,230,.12)'], [1, 'rgba(255,248,230,0)']]);
+  ctx.fillRect(DOOR_X - 72, FEET_Y - 124, 144, 144);
+  ctx.save(); ctx.translate(DOOR_X, FEET_Y + 3); ctx.scale(1, .22);
+  ctx.fillStyle = rad(0, 0, 80, [[0, 'rgba(255,244,214,.55)'], [1, 'rgba(255,244,214,0)']]); ctx.fillRect(-80, -80, 160, 160);
+  ctx.restore();
+  ell(DOOR_X, 330, 12, 5, '#ffe9a8'); ell(DOOR_X, 330, 20, 8, 'rgba(255,233,168,.25)');
+}
+
 function drawDoorMonster() {
+  drawSpotlight();
   if (door) {
     const u = Math.min(1, (T - door.t) / .5), x = DOOR_X - (1 - u) * (1 - u) * 160, bob = Math.abs(Math.sin(T * (u < 1 ? 12 : 2.4))) * (u < 1 ? 5 : 2);
     drawMonster(door.m, x, FEET_Y, BIG, 0, bob);
@@ -428,7 +442,7 @@ function frame(now) {
   ctx.setTransform(dpr * scale, 0, 0, dpr * scale, 0, 0);
   ctx.fillStyle = '#2a1f4a'; ctx.fillRect(0, 0, W, H);
   drawHud(); drawClub(); drawBoard('in'); drawBoard('out'); drawDoorMonster(); drawBanner(); drawPanel(); drawConfetti(dt);
-  if (state === 'intro') card('Secret Door', ['The doorkeeper has a secret rule.', 'Look at who got IN and who stayed OUT.', 'Then call IN or OUT for each new monster.', `${STREAK} right in a row cracks the rule!`, 'Three hearts.'], "Let's go", 'draft 2  ·  sound on', 150);
+  if (state === 'intro') card('Secret Door', ['The doorkeeper has a secret rule.', 'Look at who got IN and who stayed OUT.', 'Then call IN or OUT for each new monster.', `${STREAK} right in a row cracks the rule!`, 'Three hearts.'], "Let's go", 'draft 3  ·  sound on', 150);
   if (state === 'over') card('No hearts left!', [rule ? 'The rule was:' : '', rule ? ruleText(rule) : '', `Rules cracked: ${score}   ·   ` + (score >= best && score > 0 ? 'a new best!' : `best ${best}`)], 'Play again', '', 170);
   if (Q.has('sheet')) {
     // A sheet of every feature, for screenshots.
@@ -447,6 +461,7 @@ function autoPlay() { if (door && !busy() && T - door.t > .5) call(ruleHolds(rul
 startRun(); state = 'intro';
 if (Q.get('t')) { startRun(); const until = Number(Q.get('t')), wrongEvery = Number(Q.get('wrong') || 0); let n = 0; lives = 99; while (T < until) { if (door && !busy() && T - door.t > .5) { n++; call(wrongEvery && n % wrongEvery === 0 ? !ruleHolds(rule, door.m) : ruleHolds(rule, door.m)); } update(1 / 60); T += 1 / 60; } lives = Math.min(lives, LIVES); }
 if (Q.has('over')) { state = 'over'; score = 4; best = 6; }
+if (Q.get('door')) { state = 'play'; door = { m: { color: Q.get('door'), shape: Q.get('shape') || 'square', eyes: 3, horns: 'yes', pattern: 'spots', seed: 2 }, t: -9 }; anim = null; banner = null; }
 window.__sd = { startRun, update, call, autoPlay, makeRule, ruleHolds, ruleText, hintText, monsterFor, randomMonster, FEATS,
   get state() { return state; }, get lives() { return lives; }, set lives(v) { lives = v; }, get score() { return score; }, get rule() { return rule; },
   get door() { return door; }, get boards() { return boards; }, get streak() { return streak; }, get wrongs() { return wrongs; }, get ruleNo() { return ruleNo; },
