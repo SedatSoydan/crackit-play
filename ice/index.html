@@ -39,7 +39,10 @@ function levelSpec(n) {
   if (n <= 10) return { cols: 6, rows: 8, rocks: [7, 10], snow: n <= 7 ? 1 : 2, fish: 1, par: n <= 7 ? [5, 6] : [6, 7] };
   if (n <= 15) return { cols: 7, rows: 9, rocks: [9, 13], snow: 2, fish: 1, par: [7, 9] };
   if (n <= 22) return { cols: 7, rows: 9, rocks: [9, 13], snow: 2, fish: 2, par: [7, 9] };
-  return { cols: 7, rows: 9, rocks: [10, 14], snow: 3, fish: 2, par: [9, 11] };
+  if (n <= LEVELS) return { cols: 7, rows: 9, rocks: [10, 14], snow: 3, fish: 2, par: [9, 11] };
+  // Endless lakes after the campaign: always hard, but varied.
+  const r = mulberry(n * 104729 + 3), two = r() < .6, big = r() < .7;
+  return { cols: big ? 7 : 6, rows: big ? 9 : 8, rocks: big ? [9, 14] : [7, 11], snow: 1 + Math.floor(r() * 3), fish: two ? 2 : 1, par: two ? [8, 11] : [7, 9] };
 }
 
 // Where Pip stops when sliding from cell (x, y) in direction d.
@@ -153,12 +156,15 @@ let anim = null, bump = null, winAt = -1, stars = 0, swipe = null, sparkles = []
 let progress = {};
 try { progress = JSON.parse(localStorage.getItem('iceglide2') || '{}'); } catch (e) { /* storage off */ }
 if (Q.has('all')) for (let n = 1; n <= LEVELS; n++) progress[n] = progress[n] || 1;
-const totalStars = () => Object.values(progress).reduce((a, b) => a + b, 0);
+const totalStars = () => { let t = 0; for (let n = 1; n <= LEVELS; n++) t += progress[n] || 0; return t; };
 const unlocked = n => n === 1 || (progress[n - 1] || 0) > 0;
 const firstOpen = () => { for (let n = 1; n <= LEVELS; n++) if (!progress[n]) return n; return LEVELS; };
+const endlessOpen = () => (progress[LEVELS] || 0) > 0;
+// The next endless lake: one past the furthest endless lake solved.
+const endlessNext = () => Math.max(LEVELS + 1, (progress.endless || LEVELS) + 1);
 
 function startLevel(n) {
-  levelNo = Math.min(LEVELS, Math.max(1, n)); lv = makeLevel(levelNo);
+  levelNo = Math.max(1, n); lv = makeLevel(levelNo);
   pip = { x: lv.start[0], y: lv.start[1], face: 'down' };
   moves = 0; eaten = 0; history = []; hintUsed = false; hint = null; anim = null; bump = null; winAt = -1;
   sparkles = []; hearts = []; flips = []; trails = []; newBest = false;
@@ -192,7 +198,9 @@ function finishSlide() {
     if (hintUsed) stars = Math.min(stars, 2);
     const p = progress[levelNo] || 0;
     newBest = stars > p;
-    if (newBest) { progress[levelNo] = stars; try { localStorage.setItem('iceglide2', JSON.stringify(progress)); } catch (e) { /* storage off */ } }
+    if (levelNo > LEVELS) progress.endless = Math.max(progress.endless || LEVELS, levelNo);
+    else if (newBest) progress[levelNo] = stars;
+    try { localStorage.setItem('iceglide2', JSON.stringify(progress)); } catch (e) { /* storage off */ }
   }
 }
 function undo() {
@@ -208,7 +216,7 @@ function showHint() {
   hintUsed = true;
   hint = sol.moves < 0 ? { stuck: true, t: T } : { d: sol.firstDirs[0], t: T, left: sol.moves };
 }
-function nextFromWin() { if (levelNo >= LEVELS) state = 'done'; else startLevel(levelNo + 1); }
+function nextFromWin() { if (levelNo === LEVELS) state = 'done'; else startLevel(levelNo + 1); }
 function update(dt) {
   if (anim) {
     const u = (T - anim.t) / anim.dur;
@@ -472,6 +480,7 @@ function drawHud() {
   pill(12, 30, 108, 40);
   menuIcon(32, 50, '#3a86c8');
   text(`Lake ${levelNo}`, 78, 56, 15, '#2a5a8a', 800);
+  if (levelNo > LEVELS) text('endless', 78, 68, 9, '#7aa0c4', 700);
   // Moves against the best.
   pill(128, 30, 116, 40);
   text(`${moves}`, 156, 58, 22, '#1f4a7a', 900);
@@ -539,9 +548,9 @@ function drawCards() {
   if (state === 'intro') {
     card('Ice Glide', ['Pip slides on the ice until a rock,', 'the snow bank, or a snow patch stops it.', 'Stop right on the fish to eat it!', 'Reach it in the best number of moves', 'for three stars. 30 lakes to cross.'], 140, 290);
     button(80, 342, 200, 56, "Let's go", true, 'go');
-    text('draft 2  ·  sound on', 180, 420, 11, '#8aa6c0', 500);
+    text('draft 3  ·  sound on', 180, 420, 11, '#8aa6c0', 500);
   } else if (state === 'won') {
-    const last = levelNo >= LEVELS;
+    const last = levelNo === LEVELS;
     const msg = stars === 3 ? 'Best path!' : `Done in ${moves}. Best is ${lv.par}.`;
     const tip = hintUsed ? 'A hint helped: up to two stars.' : stars < 3 ? `Try it in ${lv.par} for three stars.` : '';
     card(`Lake ${levelNo}`, [msg, tip], 150, 300);
@@ -551,8 +560,9 @@ function drawCards() {
     button(188, 392, 112, 38, 'All lakes', false, 'map');
   } else if (state === 'done') {
     const t = totalStars();
-    card('All lakes crossed!', ['Pip is full and happy.', `You have ${t} of ${LEVELS * 3} stars.`, t < LEVELS * 3 ? 'Replay a lake in the best moves' : 'Every lake in the best moves. Wow!', t < LEVELS * 3 ? 'to fill in the missing stars.' : ''], 170, 250);
-    button(80, 336, 200, 54, 'All lakes', true, 'map');
+    card('All lakes crossed!', ['Pip is full and happy.', `You have ${t} of ${LEVELS * 3} stars.`, t < LEVELS * 3 ? 'Replay a lake in the best moves' : 'Every lake in the best moves. Wow!', t < LEVELS * 3 ? 'to fill in the missing stars.' : 'Endless lakes are open now.'], 170, 290);
+    button(80, 336, 200, 54, 'Endless lakes', true, 'endless');
+    button(110, 400, 140, 38, 'All lakes', false, 'map');
   } else if (state === 'map') drawMap();
 }
 function drawMap() {
@@ -560,7 +570,7 @@ function drawMap() {
   text('Choose a lake', 180, 52, 24, '#2a6aa8', 900);
   star(150, 80, 9, true); text(`${totalStars()} / ${LEVELS * 3}`, 188, 85, 14, '#2a5a8a', 800);
   for (let n = 1; n <= LEVELS; n++) {
-    const i = n - 1, cx = 56 + (i % 5) * 62, cy = 132 + Math.floor(i / 5) * 72, open = unlocked(n), got = progress[n] || 0;
+    const i = n - 1, cx = 56 + (i % 5) * 62, cy = 124 + Math.floor(i / 5) * 70, open = unlocked(n), got = progress[n] || 0;
     const next = open && !got;
     ctx.fillStyle = 'rgba(60,110,160,.18)'; ctx.beginPath(); ctx.ellipse(cx, cy + 4, 25, 23, 0, 0, TAU); ctx.fill();
     ctx.fillStyle = open ? lin(0, cy - 24, 0, cy + 24, [[0, '#dff4ff'], [1, '#9fd2f2']]) : '#dde7f0';
@@ -571,7 +581,14 @@ function drawMap() {
     for (let k = 0; k < 3; k++) star(cx - 13 + k * 13, cy + 31, 5.5, k < got, open ? 'rgba(120,160,200,.35)' : 'rgba(120,160,200,.15)');
     if (open) hits.push({ x: cx - 28, y: cy - 28, w: 56, h: 66, id: 'lake' + n });
   }
-  button(110, 572, 140, 42, 'Back', false, 'back');
+  // Endless lakes open after lake 30.
+  const ey = 552, eo = endlessOpen();
+  ctx.globalAlpha = eo ? 1 : .5;
+  pill(40, ey - 8, 280, 44);
+  text(eo ? `Endless lakes  ·  next ${endlessNext()}` : 'Endless lakes  ·  after lake 30', 180, ey + 19, 14, '#2a5a8a', 800);
+  ctx.globalAlpha = 1;
+  if (eo) hits.push({ x: 40, y: ey - 8, w: 280, h: 44, id: 'endless' });
+  button(120, 600, 120, 34, 'Back', false, 'back');
 }
 
 // ---------- sound
@@ -606,6 +623,7 @@ function press(id) {
   else if (id === 'again') startLevel(levelNo);
   else if (id === 'map') { mapFrom = state === 'play' ? 'play' : 'none'; state = 'map'; }
   else if (id === 'back') { if (mapFrom === 'play') state = 'play'; else startLevel(firstOpen()); }
+  else if (id === 'endless') startLevel(endlessNext());
   else if (id.startsWith('lake')) startLevel(Number(id.slice(4)));
 }
 cv.addEventListener('pointerdown', e => {
@@ -670,7 +688,7 @@ if (Q.has('map')) { state = 'map'; mapFrom = 'none'; }
 if (Q.has('done')) state = 'done';
 window.__ig = { makeLevel, solve, slide, distances, levelSpec, startLevel, move, undo, restart, showHint, update, press, nextFromWin, ICE, ROCK, SNOW, LEVELS,
   get lv() { return lv; }, get pip() { return pip; }, get moves() { return moves; }, get eaten() { return eaten; }, get state() { return state; },
-  get stars() { return stars; }, get hint() { return hint; }, get hintUsed() { return hintUsed; }, get progress() { return progress; }, unlocked, totalStars,
+  get stars() { return stars; }, get hint() { return hint; }, get hintUsed() { return hintUsed; }, get progress() { return progress; }, unlocked, totalStars, endlessNext, endlessOpen,
   busy, tick: dt => { T += dt; update(dt); } };
 requestAnimationFrame(frame);
 </script>
