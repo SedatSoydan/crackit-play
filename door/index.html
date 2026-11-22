@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Secret Door</title>
+<style>
+html,body{margin:0;height:100%;background:#2a2146;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none}
+canvas{display:block;margin:0 auto}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Secret Door, draft 1: the doorkeeper has a secret rule. Watch who gets in,
+// then call IN or OUT for each monster. Five right in a row cracks the rule.
+const W = 360, H = 640, LIVES = 3, STREAK = 5, KEEP = 6, HINT_AT = 2, SKIP_AT = 4;
+const DOOR_X = 180, FEET_Y = 508, BIG = 1.25, SMALL = .64;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let scale = 1, dpr = 1;
+function resize() {
+  dpr = window.devicePixelRatio || 1;
+  scale = Math.min(innerWidth / W, innerHeight / H);
+  cv.style.width = W * scale + 'px'; cv.style.height = H * scale + 'px';
+  cv.width = Math.round(W * scale * dpr); cv.height = Math.round(H * scale * dpr);
+}
+addEventListener('resize', resize); resize();
+function mulberry(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const Q = new URLSearchParams(location.search);
+let rnd = mulberry(Q.get('seed') ? Number(Q.get('seed')) : (Date.now() % 1e9) | 0);
+const TAU = Math.PI * 2;
+const pick = a => a[Math.floor(rnd() * a.length)];
+
+// ---------- monsters and rules
+const FEATS = { color: ['pink', 'blue', 'green', 'yellow'], shape: ['round', 'square', 'tall'], eyes: [1, 2, 3], horns: ['yes', 'no'], pattern: ['plain', 'spots', 'stripes'] };
+const NAMES = { color: 'colours', shape: 'shapes', eyes: 'eyes', horns: 'horns', pattern: 'patterns' };
+function randomMonster() { const m = {}; for (const f in FEATS) m[f] = pick(FEATS[f]); m.seed = rnd() * 1000; return m; }
+function atomHolds(a, m) { if (a.gt) return m[a.f] > a.gt; return a.not ? m[a.f] !== a.v : m[a.f] === a.v; }
+function ruleHolds(r, m) { return r.op === 'one' ? atomHolds(r.a, m) : r.op === 'and' ? atomHolds(r.a, m) && atomHolds(r.b, m) : atomHolds(r.a, m) || atomHolds(r.b, m); }
+const NUM = { 1: 'one eye', 2: 'two eyes', 3: 'three eyes' };
+function clause(a) {
+  if (a.gt) return 'with more than one eye';
+  if (a.f === 'color' || a.f === 'shape') return `that are ${a.not ? 'not ' : ''}${a.v}`;
+  if (a.f === 'eyes') return `with ${NUM[a.v]}`;
+  if (a.f === 'horns') return a.v === 'yes' ? 'with horns' : 'without horns';
+  if (a.not) return 'with spots or stripes';
+  return a.v === 'plain' ? 'with no pattern' : `with ${a.v}`;
+}
+function ruleText(r) { return 'Only monsters ' + (r.op === 'one' ? clause(r.a) : `${clause(r.a)} ${r.op} ${clause(r.b)}`) + ' get in!'; }
+function ruleKey(r) { const k = a => `${a.f}${a.not ? '!' : ''}${a.gt ? '>' + a.gt : ''}=${a.v}`; return r.op === 'one' ? k(r.a) : `${k(r.a)} ${r.op} ${k(r.b)}`; }
+function hintText(r) { return r.op === 'one' ? `Hint: look at their ${NAMES[r.a.f]}.` : `Hint: look at their ${NAMES[r.a.f]} and ${NAMES[r.b.f]}.`; }
+function simpleAtom(f) {
+  if (f === 'eyes') return { f, v: pick([1, 3]) };
+  if (f === 'horns') return { f, v: pick(['yes', 'no']) };
+  if (f === 'pattern') return { f, v: pick(['spots', 'stripes']) };
+  return { f, v: pick(FEATS[f]) };
+}
+function trickyAtom() {
+  return pick([() => ({ f: 'color', v: pick(FEATS.color), not: true }), () => ({ f: 'shape', v: pick(FEATS.shape), not: true }),
+    () => ({ f: 'eyes', gt: 1, v: 1 }), () => ({ f: 'pattern', v: 'plain', not: true })])();
+}
+let lastRuleKey = '';
+function makeRule(n) {
+  for (let k = 0; k < 50; k++) {
+    const feats = Object.keys(FEATS).sort(() => rnd() - .5);
+    let r;
+    if (n <= 2) r = { op: 'one', a: simpleAtom(feats[0]) };
+    else if (n <= 4) r = rnd() < .5 ? { op: 'one', a: trickyAtom() } : { op: 'one', a: simpleAtom(feats[0]) };
+    else r = rnd() < .6 ? { op: rnd() < .5 ? 'and' : 'or', a: simpleAtom(feats[0]), b: simpleAtom(feats[1]) } : { op: 'one', a: rnd() < .5 ? trickyAtom() : simpleAtom(feats[0]) };
+    if (ruleKey(r) !== lastRuleKey) { lastRuleKey = ruleKey(r); return r; }
+  }
+}
+// A monster that belongs IN (or OUT), not the same as one already shown.
+function monsterFor(rule, wantIn, avoid) {
+  let m;
+  for (let k = 0; k < 300; k++) {
+    m = randomMonster();
+    if (ruleHolds(rule, m) !== wantIn) continue;
+    if (!avoid.some(o => ['color', 'shape', 'eyes', 'horns', 'pattern'].every(f => o[f] === m[f]))) return m;
+  }
+  return m;
+}
+
+// ---------- state
+let state = 'intro', T = 0, lives = LIVES, score = 0, best = 0, called = 0;
+let ruleNo = 0, rule = null, boards = { in: [], out: [] }, door = null, streak = 0, wrongs = 0;
+let anim = null, banner = null, why = '', whyAt = -9, confetti = [];
+try { best = Number(localStorage.getItem('secretdoor_best') || 0); } catch (e) { /* storage off */ }
+
+function startRun() { state = 'play'; lives = LIVES; score = 0; called = 0; ruleNo = 0; lastRuleKey = ''; anim = null; banner = null; door = null; why = ''; confetti = []; nextRule(); }
+function nextRule() {
+  ruleNo++; rule = makeRule(ruleNo); streak = 0; wrongs = 0;
+  boards = { in: [], out: [] };
+  for (let k = 0; k < 2; k++) {
+    boards.in.push({ m: monsterFor(rule, true, shown()) });
+    boards.out.push({ m: monsterFor(rule, false, shown()) });
+  }
+  nextMonster();
+}
+function shown() { return boards.in.concat(boards.out).map(e => e.m).concat(door ? [door.m] : []); }
+function nextMonster() {
+  const wantIn = rnd() < .5;
+  door = { m: monsterFor(rule, wantIn, shown()), t: T };
+}
+function busy() { return anim || banner; }
+
+function call(sayIn) {
+  if (state !== 'play' || busy() || !door) return;
+  audio();
+  called++;
+  const m = door.m, isIn = ruleHolds(rule, m), right = sayIn === isIn;
+  anim = { m, to: isIn ? 'in' : 'out', t: T, wrong: !right };
+  door = null;
+  if (right) { streak++; sGood(); }
+  else {
+    streak = 0; wrongs++; sBad();
+    lives--; why = isIn ? 'That one gets IN. Look again!' : 'That one stays OUT. Look again!'; whyAt = T;
+  }
+}
+function finishAnim() {
+  const a = anim; anim = null;
+  const list = boards[a.to];
+  list.push({ m: a.m, wrong: a.wrong });
+  if (list.length > KEEP) list.shift();
+  if (lives <= 0) { endRun(); return; }
+  if (streak >= STREAK) {
+    score++; banner = { kind: 'cracked', text: ruleText(rule), t: T }; sWin();
+    for (let k = 0; k < 40; k++) confetti.push({ x: rnd() * W, y: -10 - rnd() * 120, v: 80 + rnd() * 120, r: rnd() * TAU, c: ['#ff9ec0', '#8fd0ff', '#9be38a', '#ffe27a', '#c9a6ff'][k % 5] });
+    return;
+  }
+  if (wrongs >= SKIP_AT) { banner = { kind: 'skipped', text: ruleText(rule), t: T }; return; }
+  nextMonster();
+}
+function endRun() {
+  state = 'over'; sEnd();
+  if (score > best) { best = score; try { localStorage.setItem('secretdoor_best', String(best)); } catch (e) { /* storage off */ } }
+}
+function update(dt) {
+  if (state !== 'play') return;
+  if (anim && T - anim.t >= .55) finishAnim();
+  if (banner && T - banner.t >= 2.6) { banner = null; nextRule(); }
+}
+
+// ---------- drawing helpers
+function rrect(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+function ell(x, y, rx, ry, col, rot = 0) { ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(x, y, Math.max(.1, rx), Math.max(.1, ry), rot, 0, TAU); ctx.fill(); }
+function lin(x0, y0, x1, y1, stops) { const g = ctx.createLinearGradient(x0, y0, x1, y1); stops.forEach(([o, c]) => g.addColorStop(o, c)); return g; }
+function rad(x, y, r, stops) { const g = ctx.createRadialGradient(x, y, 0, x, y, r); stops.forEach(([o, c]) => g.addColorStop(o, c)); return g; }
+function hash(n) { const x = Math.sin(n * 127.1 + 31.7) * 43758.5453; return x - Math.floor(x); }
+const SKIN = { pink: ['#ffc2d8', '#f27aa6', '#c9507e'], blue: ['#b5e2ff', '#5fb0ea', '#3a83c4'], green: ['#bdf0ae', '#62c452', '#3f9a36'], yellow: ['#fff0a8', '#ffcf3a', '#d9a514'] };
+
+// The body outline for a shape, feet at y = 0.
+function bodyPath(shape) {
+  ctx.beginPath();
+  if (shape === 'round') ctx.arc(0, -30, 27, 0, TAU);
+  else if (shape === 'square') rrect(-26, -57, 52, 52, 13);
+  else ctx.ellipse(0, -37, 20, 35, 0, 0, TAU);
+}
+function bodyTop(shape) { return shape === 'round' ? -57 : shape === 'square' ? -57 : -72; }
+
+// A monster standing at (x, y), size s; look = where the pupils point (-1..1).
+function drawMonster(m, x, y, s, look = 0, bob = 0) {
+  const [c0, c1, c2] = SKIN[m.color], top = bodyTop(m.shape);
+  ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+  ell(0, 2, 26, 5, 'rgba(20,10,40,.28)');
+  ctx.translate(0, -bob);
+  // Feet.
+  ell(-12, -3, 9, 5, c2); ell(12, -3, 9, 5, c2);
+  // Horns.
+  if (m.horns === 'yes') {
+    for (const sg of [-1, 1]) {
+      const hx = sg * (m.shape === 'tall' ? 10 : 14), hy = top + (m.shape === 'round' ? 8 : 4);
+      ctx.fillStyle = lin(0, hy - 18, 0, hy, [[0, '#fffaf0'], [1, '#e8d6b0']]);
+      ctx.beginPath(); ctx.moveTo(hx - 6 * sg, hy + 2); ctx.quadraticCurveTo(hx + 2 * sg, hy - 8, hx + 6 * sg, hy - 17); ctx.quadraticCurveTo(hx + 7 * sg, hy - 4, hx + 6 * sg, hy + 3); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = 'rgba(150,120,80,.5)'; ctx.lineWidth = 1; ctx.stroke();
+    }
+  }
+  // Body with shading, then its pattern, clipped to the body.
+  bodyPath(m.shape); ctx.fillStyle = c2; ctx.fill();
+  ctx.save(); bodyPath(m.shape); ctx.clip();
+  ctx.fillStyle = rad(-8, top + 18, 60, [[0, c0], [.55, c1], [1, c2]]); ctx.fillRect(-40, top - 4, 80, -top + 8);
+  if (m.pattern === 'spots') {
+    for (let k = 0; k < 6; k++) { const sx = (hash(m.seed + k) - .5) * 40, sy = top + 22 + hash(m.seed + k + 9) * (-top - 26), r = 3.5 + hash(m.seed + k + 3) * 3; ell(sx, sy, r, r, 'rgba(255,255,255,.55)'); }
+  } else if (m.pattern === 'stripes') {
+    ctx.fillStyle = 'rgba(40,20,60,.2)';
+    for (let yy = top + 26; yy < -6; yy += 10) ctx.fillRect(-40, yy, 80, 4.5);
+  }
+  ell(-9, top + 14, 9, 5, 'rgba(255,255,255,.35)', -.4);
+  ctx.restore();
+  // Eyes, looking toward the door.
+  const ey = top + (m.shape === 'tall' ? 24 : 20), xs = m.eyes === 1 ? [0] : m.eyes === 2 ? [-9.5, 9.5] : (m.shape === 'tall' ? [-10.5, 0, 10.5] : [-14, 0, 14]);
+  const er = m.eyes === 1 ? 9 : m.eyes === 2 ? 7 : 5.6;
+  const blink = Math.sin(T * 1.7 + m.seed) > .985;
+  for (const ex of xs) {
+    ell(ex, ey, er, blink ? er * .15 : er, '#ffffff');
+    if (!blink) { ell(ex + look * er * .35, ey + er * .1, er * .5, er * .5, '#2a1a3a'); ell(ex + look * er * .35 - er * .18, ey - er * .2, er * .17, er * .17, '#ffffff'); }
+  }
+  // Mouth with a tooth.
+  const my = ey + er + 8;
+  ctx.strokeStyle = '#4a2a4a'; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.beginPath(); ctx.arc(0, my - 4, 7, .35, Math.PI - .35); ctx.stroke(); ctx.lineCap = 'butt';
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(1.5, my + 1.4, 3.4, 3.2);
+  ell(-15, my - 2, 3.6, 2.2, 'rgba(255,120,150,.45)'); ell(15, my - 2, 3.6, 2.2, 'rgba(255,120,150,.45)');
+  ctx.restore();
+}
+
+// ---------- scene
+const PANEL = { in: [10, 80, 166, 192], out: [184, 80, 166, 192] };
+function slotPos(side, i) {
+  const [x, y] = PANEL[side];
+  return [x + 29 + (i % 3) * 54, y + 104 + Math.floor(i / 3) * 82];
+}
+function drawBoard(side) {
+  const [x, y, w, h] = PANEL[side], isIn = side === 'in';
+  ctx.fillStyle = 'rgba(10,5,30,.35)'; rrect(x, y + 4, w, h, 16); ctx.fill();
+  ctx.fillStyle = lin(0, y, 0, y + h, [[0, '#fffaf2'], [1, '#f1e6ff']]); rrect(x, y, w, h, 16); ctx.fill();
+  ctx.fillStyle = isIn ? '#5fc282' : '#f27a63'; rrect(x, y, w, 28, 14); ctx.fill(); ctx.fillRect(x, y + 14, w, 14);
+  ctx.fillStyle = '#fff'; ctx.font = '900 14px "Trebuchet MS", system-ui, sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText(isIn ? 'IN' : 'OUT', x + w / 2 + 8, y + 19);
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.6; ctx.lineCap = 'round'; ctx.beginPath();
+  const ix = x + w / 2 - 18, iy = y + 14;
+  if (isIn) { ctx.moveTo(ix - 6, iy); ctx.lineTo(ix - 2, iy + 4); ctx.lineTo(ix + 6, iy - 5); } else { ctx.moveTo(ix - 5, iy - 5); ctx.lineTo(ix + 5, iy + 5); ctx.moveTo(ix + 5, iy - 5); ctx.lineTo(ix - 5, iy + 5); }
+  ctx.stroke(); ctx.lineCap = 'butt';
+  // Floor lines for the two rows.
+  ctx.strokeStyle = 'rgba(120,90,160,.15)'; ctx.lineWidth = 1;
+  for (const ry of [y + 106, y + 188]) { ctx.beginPath(); ctx.moveTo(x + 10, ry); ctx.lineTo(x + w - 10, ry); ctx.stroke(); }
+  boards[side].forEach((e, i) => {
+    const [sx, sy] = slotPos(side, i);
+    if (e.wrong) { ctx.strokeStyle = '#ff5a5a'; ctx.lineWidth = 2; rrect(sx - 26, sy - 62, 52, 68, 10); ctx.stroke(); ell(sx + 21, sy - 57, 7, 7, '#ff5a5a'); ctx.fillStyle = '#fff'; ctx.font = '900 10px system-ui'; ctx.fillText('!', sx + 21, sy - 53.5); }
+    drawMonster(e.m, sx, sy, SMALL, isIn ? 1 : -1);
+  });
+}
+
+function drawClub() {
+  // A night street, a brick club front with a neon sign, and the door.
+  ctx.fillStyle = lin(0, 272, 0, 520, [[0, '#3a2a66'], [1, '#2a1f4a']]); ctx.fillRect(0, 272, W, 248);
+  ctx.fillStyle = 'rgba(255,255,255,.05)';
+  for (let y = 280; y < 500; y += 14) for (let x = (Math.floor(y / 14) % 2) * 15; x < W; x += 30) { rrect(x + 1, y + 1, 28, 12, 2); ctx.fill(); }
+  // Neon sign.
+  const glow = .75 + .25 * Math.sin(T * 3);
+  ctx.fillStyle = `rgba(255,120,200,${.18 * glow})`; rrect(92, 280, 176, 34, 17); ctx.fill();
+  ctx.strokeStyle = `rgba(255,140,210,${glow})`; ctx.lineWidth = 2; rrect(96, 284, 168, 26, 13); ctx.stroke();
+  ctx.fillStyle = `rgba(255,220,245,${glow})`; ctx.font = '900 14px "Trebuchet MS", system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.fillText('MONSTER  CLUB', 180, 302);
+  // The door with its frame.
+  ctx.fillStyle = '#1c1433'; rrect(DOOR_X - 56, 328, 112, 182, 52); ctx.fill();
+  ctx.fillStyle = lin(DOOR_X - 48, 0, DOOR_X + 48, 0, [[0, '#2f8f8a'], [.5, '#46b5ad'], [1, '#2a7f7a']]); rrect(DOOR_X - 48, 336, 96, 172, 46); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,.18)'; ctx.lineWidth = 2; rrect(DOOR_X - 36, 352, 72, 70, 34); ctx.stroke(); rrect(DOOR_X - 36, 432, 72, 64, 10); ctx.stroke();
+  ell(DOOR_X + 30, 440, 5, 5, '#ffd166'); ell(DOOR_X + 29, 439, 1.6, 1.6, '#fff');
+  // Streak lights over the door: one lights per right call in a row.
+  for (let k = 0; k < STREAK; k++) {
+    const a = Math.PI + (k + .5) / STREAK * Math.PI, bx = DOOR_X + Math.cos(a) * 66, by = 392 + Math.sin(a) * 74;
+    const on = k < streak;
+    if (on) { ctx.fillStyle = rad(bx, by, 14, [[0, 'rgba(255,230,120,.7)'], [1, 'rgba(255,230,120,0)']]); ctx.fillRect(bx - 14, by - 14, 28, 28); }
+    ell(bx, by, 5.5, 5.5, on ? '#ffe27a' : '#5a4a7a'); ell(bx - 1.5, by - 1.5, 1.6, 1.6, on ? '#fff' : 'rgba(255,255,255,.25)');
+  }
+  // Velvet rope.
+  for (const px of [DOOR_X - 92, DOOR_X + 92]) {
+    ell(px, 506, 10, 3, 'rgba(0,0,0,.3)');
+    ctx.fillStyle = lin(px - 4, 0, px + 4, 0, [[0, '#c9973a'], [.5, '#ffe08a'], [1, '#a87a2a']]); rrect(px - 3.5, 462, 7, 44, 3); ctx.fill();
+    ell(px, 461, 6, 6, '#ffd166');
+  }
+  ctx.strokeStyle = '#c0304a'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(DOOR_X - 92, 466); ctx.quadraticCurveTo(DOOR_X - 72, 488, DOOR_X - 56, 470); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(DOOR_X + 92, 466); ctx.quadraticCurveTo(DOOR_X + 72, 488, DOOR_X + 56, 470); ctx.stroke(); ctx.lineCap = 'butt';
+  // The pavement.
+  ctx.fillStyle = lin(0, 508, 0, 522, [[0, '#6a5a8a'], [1, '#4a3d6a']]); ctx.fillRect(0, 508, W, 14);
+}
+
+function drawDoorMonster() {
+  if (door) {
+    const u = Math.min(1, (T - door.t) / .5), x = DOOR_X - (1 - u) * (1 - u) * 160, bob = Math.abs(Math.sin(T * (u < 1 ? 12 : 2.4))) * (u < 1 ? 5 : 2);
+    drawMonster(door.m, x, FEET_Y, BIG, 0, bob);
+  }
+  if (anim) {
+    const u = Math.min(1, (T - anim.t) / .55), [tx, ty] = slotPos(anim.to, Math.min(boards[anim.to].length, KEEP - 1));
+    const x = DOOR_X + (tx - DOOR_X) * u, y = FEET_Y + (ty - FEET_Y) * u - Math.sin(u * Math.PI) * 60, s = BIG + (SMALL - BIG) * u;
+    drawMonster(anim.m, x, y, s, anim.to === 'in' ? 1 : -1);
+    if (anim.wrong) { ctx.strokeStyle = `rgba(255,90,90,${1 - u})`; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(DOOR_X, FEET_Y - 50, 40 + u * 30, 0, TAU); ctx.stroke(); }
+  }
+}
+
+function drawBanner() {
+  if (!banner) return;
+  const s = T - banner.t, a = Math.min(1, s * 5, (2.6 - s) * 4), cracked = banner.kind === 'cracked';
+  ctx.globalAlpha = a;
+  ctx.fillStyle = 'rgba(20,10,40,.45)'; rrect(20, 336, 320, 132, 22); ctx.fill();
+  ctx.fillStyle = lin(0, 330, 0, 460, [[0, '#fffbe8'], [1, '#ffeec2']]); rrect(20, 330, 320, 128, 22); ctx.fill();
+  ctx.strokeStyle = cracked ? '#ffb43a' : '#c9a6ff'; ctx.lineWidth = 3; ctx.stroke();
+  ctx.textAlign = 'center'; ctx.fillStyle = cracked ? '#e8584a' : '#7a5ab0'; ctx.font = '900 24px "Trebuchet MS", system-ui, sans-serif';
+  ctx.fillText(cracked ? 'Rule cracked!' : 'The secret rule was:', 180, 366);
+  ctx.fillStyle = '#4a3a2a'; ctx.font = '700 15px "Trebuchet MS", system-ui, sans-serif';
+  wrap(banner.text, 290).forEach((l, i) => ctx.fillText(l, 180, 396 + i * 20));
+  ctx.fillStyle = '#9a8a7a'; ctx.font = '12px system-ui, sans-serif'; ctx.fillText('A new secret rule is coming...', 180, 446);
+  ctx.globalAlpha = 1;
+}
+function wrap(text, maxW) { const out = []; let line = ''; for (const w of text.split(' ')) { const t = line ? line + ' ' + w : w; if (ctx.measureText(t).width > maxW && line) { out.push(line); line = w; } else line = t; } if (line) out.push(line); return out; }
+
+function drawConfetti(dt) {
+  for (const c of confetti) {
+    c.y += c.v * dt; c.r += dt * 4;
+    ctx.save(); ctx.translate(c.x + Math.sin(c.y * .05) * 8, c.y); ctx.rotate(c.r); ctx.fillStyle = c.c; ctx.fillRect(-4, -2.5, 8, 5); ctx.restore();
+  }
+  confetti = confetti.filter(c => c.y < H + 20);
+}
+
+function heart(x, y, r, full) {
+  ctx.beginPath(); ctx.moveTo(x, y + r * .9);
+  ctx.bezierCurveTo(x - r * 1.6, y - r * .2, x - r * .7, y - r * 1.3, x, y - r * .45);
+  ctx.bezierCurveTo(x + r * .7, y - r * 1.3, x + r * 1.6, y - r * .2, x, y + r * .9);
+  ctx.fillStyle = full ? lin(x, y - r, x, y + r, [[0, '#ff8f98'], [1, '#f04a5a']]) : '#4a3d6a'; ctx.fill();
+  if (full) ell(x - r * .45, y - r * .35, r * .28, r * .18, 'rgba(255,255,255,.7)', -.6);
+}
+function drawHud() {
+  ctx.fillStyle = lin(0, 0, 0, 72, [[0, '#3a2a66'], [1, '#2a1f4a']]); ctx.fillRect(0, 0, W, 72);
+  ctx.fillStyle = '#ff9ec8'; ctx.font = '800 13px "Trebuchet MS", system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.fillText('S E C R E T   D O O R', 180, 22);
+  ctx.fillStyle = 'rgba(0,0,0,.25)'; rrect(132, 31, 96, 36, 18); ctx.fill();
+  ctx.fillStyle = '#4a3a7a'; rrect(132, 28, 96, 36, 18); ctx.fill(); ctx.strokeStyle = 'rgba(255,158,200,.5)'; ctx.lineWidth = 1.2; ctx.stroke();
+  ctx.fillStyle = '#ffe27a'; ctx.font = '800 24px "Trebuchet MS", system-ui, sans-serif'; ctx.fillText(String(score), 180, 54);
+  for (let i = 0; i < LIVES; i++) heart(26 + i * 25, 46, 8.5, i < lives);
+  if (state !== 'intro') { ctx.fillStyle = '#b9a6e0'; ctx.font = '700 11px system-ui, sans-serif'; ctx.textAlign = 'right'; ctx.fillText(`rule ${ruleNo}`, 340, 50); }
+}
+
+const BTN_IN = [16, 530, 160, 66], BTN_OUT = [184, 530, 160, 66];
+function bigButton(r, label, face, edge, kind) {
+  const [x, y, w, h] = r;
+  ctx.fillStyle = edge; rrect(x, y + 6, w, h, 24); ctx.fill();
+  ctx.fillStyle = face; rrect(x, y, w, h, 24); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,.22)'; rrect(x + 5, y + 4, w - 10, h * .4, 18); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.font = '900 24px "Trebuchet MS", system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(label, x + w / 2 + 12, y + h / 2 + 1); ctx.textBaseline = 'alphabetic';
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 3.2; ctx.lineCap = 'round'; ctx.beginPath();
+  const ix = x + 34, iy = y + h / 2;
+  if (kind === 'in') { ctx.moveTo(ix - 9, iy); ctx.lineTo(ix - 3, iy + 7); ctx.lineTo(ix + 9, iy - 7); } else { ctx.moveTo(ix - 7, iy - 7); ctx.lineTo(ix + 7, iy + 7); ctx.moveTo(ix + 7, iy - 7); ctx.lineTo(ix - 7, iy + 7); }
+  ctx.stroke(); ctx.lineCap = 'butt';
+}
+function drawPanel() {
+  ctx.fillStyle = lin(0, 522, 0, H, [[0, '#2a1f4a'], [1, '#1f1838']]); ctx.fillRect(0, 522, W, H - 522);
+  const dim = busy() ? .5 : 1;
+  ctx.globalAlpha = dim;
+  bigButton(BTN_IN, 'IN', '#5fc282', '#3f9e62', 'in');
+  bigButton(BTN_OUT, 'OUT', '#f27a63', '#c9503f', 'out');
+  ctx.globalAlpha = 1;
+  ctx.textAlign = 'center';
+  if (state === 'play' && T - whyAt < 1.8 && why) { ctx.fillStyle = '#ff8f8f'; ctx.font = '700 13px "Trebuchet MS", system-ui, sans-serif'; ctx.fillText(why, 180, 622); }
+  else if (state === 'play' && wrongs >= HINT_AT && !banner) { ctx.fillStyle = '#ffe27a'; ctx.font = '700 13px "Trebuchet MS", system-ui, sans-serif'; ctx.fillText(hintText(rule), 180, 622); }
+  else if (state === 'play') { ctx.fillStyle = '#b9a6e0'; ctx.font = '600 12px system-ui, sans-serif'; ctx.fillText(`Does this one get in?  ${STREAK} right in a row cracks the rule.`, 180, 622); }
+}
+
+let btnY = 0;
+function button(x, y, w, h, label) {
+  ctx.fillStyle = '#3f9e62'; rrect(x, y + 5, w, h, 26); ctx.fill();
+  ctx.fillStyle = lin(0, y, 0, y + h, [[0, '#74d394'], [1, '#4fb874']]); rrect(x, y, w, h, 26); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,.25)'; rrect(x + 5, y + 4, w - 10, h * .4, 20); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.font = '800 20px "Trebuchet MS", system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(label, x + w / 2, y + h / 2 + 1); ctx.textBaseline = 'alphabetic';
+}
+function card(title, lines, btn, note, y0) {
+  const h = 76 + lines.length * 22 + 74 + (note ? 18 : 0);
+  ctx.fillStyle = 'rgba(20,12,40,.7)'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = 'rgba(0,0,0,.3)'; rrect(26, y0 + 8, 308, h, 26); ctx.fill();
+  ctx.fillStyle = lin(0, y0, 0, y0 + h, [[0, '#fffaf2'], [1, '#f1e6ff']]); rrect(26, y0, 308, h, 26); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,158,200,.6)'; ctx.lineWidth = 1.5; ctx.stroke();
+  drawMonster({ color: 'blue', shape: 'round', eyes: 3, horns: 'yes', pattern: 'spots', seed: 4 }, 300, y0 + 30, .5);
+  ctx.textAlign = 'center'; ctx.fillStyle = '#7a4ab0'; ctx.font = '800 28px "Trebuchet MS", system-ui, sans-serif'; ctx.fillText(title, 180, y0 + 44);
+  ctx.fillStyle = '#4a3a5a'; ctx.font = '14px system-ui, sans-serif';
+  lines.forEach((l, i) => ctx.fillText(l, 180, y0 + 76 + i * 22));
+  btnY = y0 + 76 + lines.length * 22;
+  button(80, btnY, 200, 56, btn);
+  if (note) { ctx.fillStyle = '#9a8ab0'; ctx.font = '11px system-ui, sans-serif'; ctx.fillText(note, 180, btnY + 82); }
+}
+
+// ---------- sound
+let AC = null, master = null;
+function audio() {
+  if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+  try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return; }
+  master = AC.createGain(); master.gain.value = .6; master.connect(AC.destination);
+}
+function tone(f, when, dur, vol, type = 'sine', to = 0) {
+  if (!AC) return;
+  const o = AC.createOscillator(), g = AC.createGain(); o.type = type; o.frequency.setValueAtTime(f, when);
+  if (to) o.frequency.exponentialRampToValueAtTime(to, when + dur);
+  g.gain.setValueAtTime(0, when); g.gain.linearRampToValueAtTime(vol, when + .012); g.gain.exponentialRampToValueAtTime(.0005, when + dur);
+  o.connect(g); g.connect(master); o.start(when); o.stop(when + dur + .05);
+}
+function sGood() { if (!AC) return; const t = AC.currentTime; tone(660 + streak * 90, t, .18, .07, 'triangle'); }
+function sBad() { if (AC) tone(240, AC.currentTime, .3, .12, 'triangle', 140); }
+function sWin() { if (!AC) return; const t = AC.currentTime; [523, 659, 784, 1047].forEach((f, i) => tone(f, t + i * .1, .5, .07, 'triangle')); }
+function sEnd() { if (AC) { const t = AC.currentTime; [784, 659, 523].forEach((f, i) => tone(f, t + i * .14, .4, .08, 'triangle')); } }
+function sClick() { if (AC) tone(880, AC.currentTime, .04, .05, 'triangle'); }
+
+// ---------- input
+function hit(x, y, r) { return x >= r[0] && x <= r[0] + r[2] && y >= r[1] && y <= r[1] + r[3]; }
+function pagePos(e) { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) / scale, (e.clientY - r.top) / scale]; }
+cv.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  const [x, y] = pagePos(e);
+  audio();
+  if (state === 'intro' || state === 'over') { if (x >= 80 && x <= 280 && y >= btnY && y <= btnY + 56) { sClick(); startRun(); } return; }
+  if (hit(x, y, BTN_IN)) call(true); else if (hit(x, y, BTN_OUT)) call(false);
+});
+addEventListener('keydown', e => {
+  if ((state === 'intro' || state === 'over') && (e.key === 'Enter' || e.key === ' ')) { audio(); startRun(); return; }
+  if (e.key === 'ArrowLeft' || e.key === 'a') call(true);
+  if (e.key === 'ArrowRight' || e.key === 'd') call(false);
+});
+
+// ---------- frame
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(.05, (now - last) / 1000); last = now; T += dt;
+  update(dt);
+  ctx.setTransform(dpr * scale, 0, 0, dpr * scale, 0, 0);
+  ctx.fillStyle = '#2a1f4a'; ctx.fillRect(0, 0, W, H);
+  drawHud(); drawClub(); drawBoard('in'); drawBoard('out'); drawDoorMonster(); drawBanner(); drawPanel(); drawConfetti(dt);
+  if (state === 'intro') card('Secret Door', ['The doorkeeper has a secret rule.', 'Look at who got IN and who stayed OUT.', 'Then call IN or OUT for each new monster.', `${STREAK} right in a row cracks the rule!`, 'Three hearts.'], "Let's go", 'draft 1  ·  sound on', 150);
+  if (state === 'over') card('No hearts left!', [rule ? 'The rule was:' : '', rule ? ruleText(rule) : '', `Rules cracked: ${score}   ·   ` + (score >= best && score > 0 ? 'a new best!' : `best ${best}`)], 'Play again', '', 170);
+  requestAnimationFrame(frame);
+}
+
+// ---------- tests and screenshots
+function autoPlay() { if (door && !busy() && T - door.t > .5) call(ruleHolds(rule, door.m)); }
+startRun(); state = 'intro';
+if (Q.get('t')) { startRun(); const until = Number(Q.get('t')), wrongEvery = Number(Q.get('wrong') || 0); let n = 0; lives = 99; while (T < until) { if (door && !busy() && T - door.t > .5) { n++; call(wrongEvery && n % wrongEvery === 0 ? !ruleHolds(rule, door.m) : ruleHolds(rule, door.m)); } update(1 / 60); T += 1 / 60; } lives = Math.min(lives, LIVES); }
+if (Q.has('over')) { state = 'over'; score = 4; best = 6; }
+window.__sd = { startRun, update, call, autoPlay, makeRule, ruleHolds, ruleText, hintText, monsterFor, randomMonster, FEATS,
+  get state() { return state; }, get lives() { return lives; }, set lives(v) { lives = v; }, get score() { return score; }, get rule() { return rule; },
+  get door() { return door; }, get boards() { return boards; }, get streak() { return streak; }, get wrongs() { return wrongs; }, get ruleNo() { return ruleNo; },
+  busy, tick: dt => { T += dt; update(dt); }, setRnd: f => rnd = f };
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
