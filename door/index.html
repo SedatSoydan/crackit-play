@@ -12,7 +12,7 @@ canvas{display:block;margin:0 auto}
 <body>
 <canvas id="c"></canvas>
 <script>
-// Secret Door, draft 1: the doorkeeper has a secret rule. Watch who gets in,
+// Secret Door, draft 2: the doorkeeper has a secret rule. Watch who gets in,
 // then call IN or OUT for each monster. Five right in a row cracks the rule.
 const W = 360, H = 640, LIVES = 3, STREAK = 5, KEEP = 6, HINT_AT = 2, SKIP_AT = 4;
 const DOOR_X = 180, FEET_Y = 508, BIG = 1.25, SMALL = .64;
@@ -147,54 +147,70 @@ function ell(x, y, rx, ry, col, rot = 0) { ctx.fillStyle = col; ctx.beginPath();
 function lin(x0, y0, x1, y1, stops) { const g = ctx.createLinearGradient(x0, y0, x1, y1); stops.forEach(([o, c]) => g.addColorStop(o, c)); return g; }
 function rad(x, y, r, stops) { const g = ctx.createRadialGradient(x, y, 0, x, y, r); stops.forEach(([o, c]) => g.addColorStop(o, c)); return g; }
 function hash(n) { const x = Math.sin(n * 127.1 + 31.7) * 43758.5453; return x - Math.floor(x); }
-const SKIN = { pink: ['#ffc2d8', '#f27aa6', '#c9507e'], blue: ['#b5e2ff', '#5fb0ea', '#3a83c4'], green: ['#bdf0ae', '#62c452', '#3f9a36'], yellow: ['#fff0a8', '#ffcf3a', '#d9a514'] };
+const SKIN = { pink: ['#ffb0d0', '#ff5fa2', '#d63c80'], blue: ['#a6dcff', '#3a9cf0', '#2373c4'], green: ['#b6f0a0', '#45bf3a', '#2c8f28'], yellow: ['#fff09a', '#ffc81f', '#d99a00'] };
 
-// The body outline for a shape, feet at y = 0.
+// The body outline for a shape, feet at y = 0: a ball, a wide box, or a tall bean.
 function bodyPath(shape) {
   ctx.beginPath();
-  if (shape === 'round') ctx.arc(0, -30, 27, 0, TAU);
-  else if (shape === 'square') rrect(-26, -57, 52, 52, 13);
-  else ctx.ellipse(0, -37, 20, 35, 0, 0, TAU);
+  if (shape === 'round') ctx.arc(0, -31, 29, 0, TAU);
+  else if (shape === 'square') rrect(-31, -54, 62, 50, 9);
+  else ctx.ellipse(0, -43, 16, 41, 0, 0, TAU);
 }
-function bodyTop(shape) { return shape === 'round' ? -57 : shape === 'square' ? -57 : -72; }
+function bodyTop(shape) { return shape === 'round' ? -60 : shape === 'square' ? -54 : -84; }
+// Where the eyes sit, and how big, for each shape and count.
+function eyeLayout(m) {
+  const top = bodyTop(m.shape);
+  if (m.shape === 'tall') return { y: top + 26, xs: m.eyes === 1 ? [0] : m.eyes === 2 ? [-7, 7] : [-9.5, 0, 9.5], r: m.eyes === 1 ? 8.5 : m.eyes === 2 ? 6 : 4.8 };
+  return { y: top + (m.shape === 'round' ? 22 : 18), xs: m.eyes === 1 ? [0] : m.eyes === 2 ? [-11, 11] : [-16, 0, 16], r: m.eyes === 1 ? 11.5 : m.eyes === 2 ? 8.5 : 6.8 };
+}
 
 // A monster standing at (x, y), size s; look = where the pupils point (-1..1).
 function drawMonster(m, x, y, s, look = 0, bob = 0) {
-  const [c0, c1, c2] = SKIN[m.color], top = bodyTop(m.shape);
+  const [c0, c1, c2] = SKIN[m.color], top = bodyTop(m.shape), eye = eyeLayout(m);
   ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
-  ell(0, 2, 26, 5, 'rgba(20,10,40,.28)');
+  ell(0, 2, m.shape === 'square' ? 32 : 26, 5, 'rgba(20,10,40,.3)');
   ctx.translate(0, -bob);
   // Feet.
-  ell(-12, -3, 9, 5, c2); ell(12, -3, 9, 5, c2);
-  // Horns.
+  ell(-13, -3, 9.5, 5.5, c2); ell(13, -3, 9.5, 5.5, c2);
+  // Horns: big, dark, and shiny, so they stand out on every colour.
   if (m.horns === 'yes') {
     for (const sg of [-1, 1]) {
-      const hx = sg * (m.shape === 'tall' ? 10 : 14), hy = top + (m.shape === 'round' ? 8 : 4);
-      ctx.fillStyle = lin(0, hy - 18, 0, hy, [[0, '#fffaf0'], [1, '#e8d6b0']]);
-      ctx.beginPath(); ctx.moveTo(hx - 6 * sg, hy + 2); ctx.quadraticCurveTo(hx + 2 * sg, hy - 8, hx + 6 * sg, hy - 17); ctx.quadraticCurveTo(hx + 7 * sg, hy - 4, hx + 6 * sg, hy + 3); ctx.closePath(); ctx.fill();
-      ctx.strokeStyle = 'rgba(150,120,80,.5)'; ctx.lineWidth = 1; ctx.stroke();
+      const hx = sg * (m.shape === 'tall' ? 9 : m.shape === 'square' ? 19 : 15), hy = top + (m.shape === 'round' ? 9 : m.shape === 'square' ? 3 : 7);
+      ctx.fillStyle = lin(0, hy - 24, 0, hy, [[0, '#8a6abf'], [1, '#4a2f78']]);
+      ctx.beginPath(); ctx.moveTo(hx - 7 * sg, hy + 3); ctx.quadraticCurveTo(hx + 1 * sg, hy - 10, hx + 7 * sg, hy - 24); ctx.quadraticCurveTo(hx + 9 * sg, hy - 6, hx + 7 * sg, hy + 4); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = '#2f1a52'; ctx.lineWidth = 1.4; ctx.stroke();
+      ell(hx + 2 * sg, hy - 10, 1.6, 4, 'rgba(255,255,255,.45)', sg * .4);
     }
   }
   // Body with shading, then its pattern, clipped to the body.
   bodyPath(m.shape); ctx.fillStyle = c2; ctx.fill();
   ctx.save(); bodyPath(m.shape); ctx.clip();
-  ctx.fillStyle = rad(-8, top + 18, 60, [[0, c0], [.55, c1], [1, c2]]); ctx.fillRect(-40, top - 4, 80, -top + 8);
+  ctx.fillStyle = rad(-8, top + 18, 64, [[0, c0], [.5, c1], [1, c2]]); ctx.fillRect(-40, top - 4, 80, -top + 8);
+  // The pattern covers the body but leaves a clean face, so eyes stay easy to count.
+  const faceY = eye.y + eye.r * .6 + 3, faceRx = Math.max(...eye.xs.map(Math.abs)) + eye.r + 5, faceRy = eye.r + 13;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(-50, top - 10, 100, -top + 20); ctx.ellipse(0, faceY, faceRx, faceRy, 0, 0, TAU); ctx.clip('evenodd');
   if (m.pattern === 'spots') {
-    for (let k = 0; k < 6; k++) { const sx = (hash(m.seed + k) - .5) * 40, sy = top + 22 + hash(m.seed + k + 9) * (-top - 26), r = 3.5 + hash(m.seed + k + 3) * 3; ell(sx, sy, r, r, 'rgba(255,255,255,.55)'); }
+    ctx.fillStyle = 'rgba(40,15,70,.42)';
+    for (let gy = top + 4; gy < 2; gy += 13) for (let gx = -36 + ((gy - top) / 13 % 2) * 7; gx < 40; gx += 14) {
+      const r = 4.2 + hash(m.seed + gx * 3 + gy) * 1.6;
+      ctx.beginPath(); ctx.arc(gx, gy, r, 0, TAU); ctx.fill();
+    }
   } else if (m.pattern === 'stripes') {
-    ctx.fillStyle = 'rgba(40,20,60,.2)';
-    for (let yy = top + 26; yy < -6; yy += 10) ctx.fillRect(-40, yy, 80, 4.5);
+    ctx.fillStyle = 'rgba(40,15,70,.42)';
+    for (let yy = top + 6; yy < 0; yy += 13) ctx.fillRect(-50, yy, 100, 6);
   }
-  ell(-9, top + 14, 9, 5, 'rgba(255,255,255,.35)', -.4);
   ctx.restore();
-  // Eyes, looking toward the door.
-  const ey = top + (m.shape === 'tall' ? 24 : 20), xs = m.eyes === 1 ? [0] : m.eyes === 2 ? [-9.5, 9.5] : (m.shape === 'tall' ? [-10.5, 0, 10.5] : [-14, 0, 14]);
-  const er = m.eyes === 1 ? 9 : m.eyes === 2 ? 7 : 5.6;
+  ell(-10, top + 12, 9, 4.5, 'rgba(255,255,255,.35)', -.4);
+  ctx.restore();
+  // Eyes, looking toward the door, with a dark rim so the count is easy to see.
   const blink = Math.sin(T * 1.7 + m.seed) > .985;
-  for (const ex of xs) {
-    ell(ex, ey, er, blink ? er * .15 : er, '#ffffff');
-    if (!blink) { ell(ex + look * er * .35, ey + er * .1, er * .5, er * .5, '#2a1a3a'); ell(ex + look * er * .35 - er * .18, ey - er * .2, er * .17, er * .17, '#ffffff'); }
+  for (const ex of eye.xs) {
+    ell(ex, eye.y, eye.r + 1.4, (blink ? eye.r * .15 : eye.r) + 1.4, 'rgba(40,15,60,.55)');
+    ell(ex, eye.y, eye.r, blink ? eye.r * .15 : eye.r, '#ffffff');
+    if (!blink) { ell(ex + look * eye.r * .35, eye.y + eye.r * .1, eye.r * .52, eye.r * .52, '#2a1a3a'); ell(ex + look * eye.r * .35 - eye.r * .18, eye.y - eye.r * .2, eye.r * .18, eye.r * .18, '#ffffff'); }
   }
+  const ey = eye.y, er = eye.r;
   // Mouth with a tooth.
   const my = ey + er + 8;
   ctx.strokeStyle = '#4a2a4a'; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.beginPath(); ctx.arc(0, my - 4, 7, .35, Math.PI - .35); ctx.stroke(); ctx.lineCap = 'butt';
@@ -412,8 +428,17 @@ function frame(now) {
   ctx.setTransform(dpr * scale, 0, 0, dpr * scale, 0, 0);
   ctx.fillStyle = '#2a1f4a'; ctx.fillRect(0, 0, W, H);
   drawHud(); drawClub(); drawBoard('in'); drawBoard('out'); drawDoorMonster(); drawBanner(); drawPanel(); drawConfetti(dt);
-  if (state === 'intro') card('Secret Door', ['The doorkeeper has a secret rule.', 'Look at who got IN and who stayed OUT.', 'Then call IN or OUT for each new monster.', `${STREAK} right in a row cracks the rule!`, 'Three hearts.'], "Let's go", 'draft 1  ·  sound on', 150);
+  if (state === 'intro') card('Secret Door', ['The doorkeeper has a secret rule.', 'Look at who got IN and who stayed OUT.', 'Then call IN or OUT for each new monster.', `${STREAK} right in a row cracks the rule!`, 'Three hearts.'], "Let's go", 'draft 2  ·  sound on', 150);
   if (state === 'over') card('No hearts left!', [rule ? 'The rule was:' : '', rule ? ruleText(rule) : '', `Rules cracked: ${score}   ·   ` + (score >= best && score > 0 ? 'a new best!' : `best ${best}`)], 'Play again', '', 170);
+  if (Q.has('sheet')) {
+    // A sheet of every feature, for screenshots.
+    ctx.fillStyle = '#f6f0ff'; ctx.fillRect(0, 0, W, H);
+    const cols = ['pink', 'blue', 'green', 'yellow'], shapes = ['round', 'square', 'tall'], pats = ['plain', 'spots', 'stripes'];
+    for (let r = 0; r < 4; r++) for (let c = 0; c < 3; c++) {
+      const m = { color: cols[r], shape: shapes[c], eyes: (r + c) % 3 + 1, horns: (r + c) % 2 ? 'yes' : 'no', pattern: pats[(r * 2 + c) % 3], seed: r * 3 + c };
+      drawMonster(m, 60 + c * 120, 140 + r * 150, 1.15);
+    }
+  }
   requestAnimationFrame(frame);
 }
 
