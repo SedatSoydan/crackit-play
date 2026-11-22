@@ -12,7 +12,7 @@ canvas{display:block;margin:0 auto}
 <body>
 <canvas id="c"></canvas>
 <script>
-// Secret Door, draft 4: the doorkeeper has a secret rule. Watch who gets in,
+// Secret Door, draft 5: the doorkeeper has a secret rule. Watch who gets in,
 // then call IN or OUT for each monster. Five right in a row cracks the rule.
 const W = 360, H = 640, LIVES = 3, STREAK = 5, KEEP = 6, HINT_AT = 2, SKIP_AT = 4;
 const DOOR_X = 180, FEET_Y = 508, BIG = 1.25, SMALL = .64;
@@ -100,47 +100,77 @@ const PAIRS_H = [];
   const eq = []; for (const f in FEATS) for (const v of FEATS[f]) eq.push({ f, v });
   for (let i = 0; i < eq.length; i++) for (let j = i + 1; j < eq.length; j++) if (eq[i].f !== eq[j].f) for (const op of ['and', 'or']) PAIRS_H.push({ op, a: eq[i], b: eq[j] });
 }
-function hypotheses(n) { return n >= 5 ? SINGLES.concat(PAIRS_H) : SINGLES; }
+// Every rule is checked against all of these from rule 1, so even a player who
+// guesses a two-feature rule early is never misled.
+const HYPS = SINGLES.concat(PAIRS_H);
+function hypotheses() { return HYPS; }
 function sameRule(a, b) { return ALL.every(m => ruleHolds(a, m) === ruleHolds(b, m)); }
 function fits(h, bds) { return bds.in.every(e => ruleHolds(h, e.m)) && bds.out.every(e => !ruleHolds(h, e.m)); }
+// The guessable rules that differ from the secret one; set for each new rule.
+let others = [], lean = 0;
 // Rules other than the secret one that still fit everything on the boards.
-function rivals(bds) { return hypotheses(ruleNo).filter(h => fits(h, bds) && !sameRule(h, rule)); }
-// A wrong call is a fair guess when another rule that fits the boards gives that answer.
-function fairGuess(m, sayIn) { return rivals(boards).some(h => ruleHolds(h, m) === sayIn); }
+function rivals(bds) { return others.filter(h => fits(h, bds)); }
+const sameLook = (a, b) => ['color', 'shape', 'eyes', 'horns', 'pattern'].every(f => a[f] === b[f]);
+// Boards that only the secret rule fits: start with one monster a side, then add
+// the monsters that rule out the most rivals until none is left.
+function clearBoards() {
+  let best = null;
+  for (let k = 0; k < 12; k++) {
+    const bds = { in: [{ m: monsterFor(rule, true, []) }], out: [] };
+    bds.out.push({ m: monsterFor(rule, false, [bds.in[0].m]) });
+    let rv = rivals(bds);
+    while (rv.length && bds.in.length + bds.out.length < 10) {
+      const used = bds.in.concat(bds.out).map(e => e.m);
+      // Keep the two boards about even.
+      const side = bds.in.length < bds.out.length ? 'in' : bds.out.length < bds.in.length ? 'out' : null;
+      let top = -1, picks = [];
+      for (const m of ALL) {
+        const isIn = ruleHolds(rule, m);
+        if ((side === 'in' && !isIn) || (side === 'out' && isIn) || used.some(o => sameLook(o, m))) continue;
+        const cut = rv.filter(h => ruleHolds(h, m) !== isIn).length;
+        if (cut > top) { top = cut; picks = [m]; } else if (cut === top) picks.push(m);
+      }
+      if (top <= 0 && side) { // Nothing on this side helps: let the other side take a turn.
+        const m = monsterFor(rule, side === 'in', used); bds[side].push({ m }); rv = rivals(bds); continue;
+      }
+      const m = { ...pick(picks), seed: rnd() * 1000 };
+      bds[ruleHolds(rule, m) ? 'in' : 'out'].push({ m });
+      rv = rivals(bds);
+    }
+    while (bds.in.length < 2) bds.in.push({ m: monsterFor(rule, true, bds.in.concat(bds.out).map(e => e.m)) });
+    while (bds.out.length < 2) bds.out.push({ m: monsterFor(rule, false, bds.in.concat(bds.out).map(e => e.m)) });
+    const size = (rv.length ? 100 : 0) + bds.in.length + bds.out.length + Math.abs(bds.in.length - bds.out.length);
+    if (!best || size < best.size) best = { bds, size };
+  }
+  return best.bds;
+}
+// A monster whose answer every rule that fits the boards agrees on.
+function settled(m, rv = rivals(boards)) { return rv.every(h => ruleHolds(h, m) === ruleHolds(rule, m)); }
 
 // ---------- state
 let state = 'intro', T = 0, lives = LIVES, score = 0, best = 0, called = 0;
 let ruleNo = 0, rule = null, boards = { in: [], out: [] }, door = null, streak = 0, wrongs = 0;
-let anim = null, banner = null, why = '', whyAt = -9, confetti = [], fair = false;
+let anim = null, banner = null, why = '', whyAt = -9, confetti = [];
 try { best = Number(localStorage.getItem('secretdoor_best') || 0); } catch (e) { /* storage off */ }
 
 function startRun() { state = 'play'; lives = LIVES; score = 0; called = 0; ruleNo = 0; lastRuleKey = ''; anim = null; banner = null; door = null; why = ''; confetti = []; nextRule(); }
 function nextRule() {
   ruleNo++; rule = makeRule(ruleNo); streak = 0; wrongs = 0;
-  let bestSet = null, bestRivals = 1e9;
-  for (let k = 0; k < 24; k++) {
-    boards = { in: [], out: [] };
-    for (let j = 0; j < 2; j++) {
-      boards.in.push({ m: monsterFor(rule, true, shown()) });
-      boards.out.push({ m: monsterFor(rule, false, shown()) });
-    }
-    const r = rivals(boards).length;
-    if (r < bestRivals) { bestRivals = r; bestSet = boards; }
-  }
-  boards = bestSet;
+  others = HYPS.filter(h => !sameRule(h, rule));
+  door = null; boards = clearBoards();
   nextMonster();
 }
 function shown() { return boards.in.concat(boards.out).map(e => e.m).concat(door ? [door.m] : []); }
 function nextMonster() {
-  const wantIn = rnd() < .5, rv = rivals(boards);
-  let best = null, bestScore = -1;
-  for (let k = 0; k < 16; k++) {
-    const m = monsterFor(rule, wantIn, shown());
-    // How many rivals would get this one wrong, and so be ruled out.
-    const score = rv.filter(h => ruleHolds(h, m) !== wantIn).length + rnd() * .5;
-    if (score > bestScore) { bestScore = score; best = m; }
-  }
-  door = { m: best, t: T };
+  // Only monsters with one right answer come to the door.
+  // About half get in: lean toward the side that has come less lately.
+  const wantIn = rnd() < Math.min(.85, Math.max(.15, .5 + .2 * lean)), used = shown(), rv = rivals(boards);
+  lean += wantIn ? -1 : 1;
+  let pool = ALL.filter(m => ruleHolds(rule, m) === wantIn && settled(m, rv) && !used.some(o => sameLook(o, m)));
+  // Few monsters fit this side: one seen before may come again, but not the last one.
+  if (!pool.length) pool = ALL.filter(m => ruleHolds(rule, m) === wantIn && settled(m, rv) && !(door && sameLook(door.m, m)) && !(anim && sameLook(anim.m, m)));
+  if (!pool.length) pool = ALL.filter(m => settled(m, rv) && !used.some(o => sameLook(o, m)));
+  door = { m: { ...pick(pool), seed: rnd() * 1000 }, t: T };
 }
 function busy() { return anim || banner; }
 
@@ -152,11 +182,7 @@ function call(sayIn) {
   anim = { m, to: isIn ? 'in' : 'out', t: T, wrong: !right };
   door = null;
   if (right) { streak++; sGood(); }
-  else if (fairGuess(m, sayIn)) {
-    // The boards fit another rule that gives this answer: no heart lost.
-    streak = 0; sFair(); fair = true; anim.wrong = false; anim.fair = true;
-    why = 'Fair guess! The boards fit another rule too.'; whyAt = T;
-  } else {
+  else {
     streak = 0; wrongs++; sBad();
     lives--; why = isIn ? 'That one gets IN. Look again!' : 'That one stays OUT. Look again!'; whyAt = T;
   }
@@ -165,7 +191,15 @@ function finishAnim() {
   const a = anim; anim = null;
   const list = boards[a.to];
   list.push({ m: a.m, wrong: a.wrong });
-  if (list.length > KEEP) list.shift();
+  if (list.length > KEEP) {
+    const before = rivals(boards).length;
+    let i = 0;
+    for (; i < list.length - 1; i++) {
+      const rest = list.filter((_, j) => j !== i), trial = { ...boards, [a.to]: rest };
+      if (rivals(trial).length <= before) break;
+    }
+    list.splice(i, 1);
+  }
   if (lives <= 0) { endRun(); return; }
   if (streak >= STREAK) {
     score++; banner = { kind: 'cracked', text: ruleText(rule), t: T }; sWin();
@@ -414,7 +448,7 @@ function drawPanel() {
   bigButton(BTN_OUT, 'OUT', '#f27a63', '#c9503f', 'out');
   ctx.globalAlpha = 1;
   ctx.textAlign = 'center';
-  if (state === 'play' && T - whyAt < 1.8 && why) { ctx.fillStyle = why.startsWith('Fair') ? '#ffe27a' : '#ff8f8f'; ctx.font = '700 13px "Trebuchet MS", system-ui, sans-serif'; ctx.fillText(why, 180, 622); }
+  if (state === 'play' && T - whyAt < 1.8 && why) { ctx.fillStyle = '#ff8f8f'; ctx.font = '700 13px "Trebuchet MS", system-ui, sans-serif'; ctx.fillText(why, 180, 622); }
   else if (state === 'play' && wrongs >= HINT_AT && !banner) { ctx.fillStyle = '#ffe27a'; ctx.font = '700 13px "Trebuchet MS", system-ui, sans-serif'; ctx.fillText(hintText(rule), 180, 622); }
   else if (state === 'play') { ctx.fillStyle = '#b9a6e0'; ctx.font = '600 12px system-ui, sans-serif'; ctx.fillText(`Does this one get in?  ${STREAK} right in a row cracks the rule.`, 180, 622); }
 }
@@ -457,7 +491,6 @@ function tone(f, when, dur, vol, type = 'sine', to = 0) {
   o.connect(g); g.connect(master); o.start(when); o.stop(when + dur + .05);
 }
 function sGood() { if (!AC) return; const t = AC.currentTime; tone(660 + streak * 90, t, .18, .07, 'triangle'); }
-function sFair() { if (!AC) return; const t = AC.currentTime; tone(520, t, .16, .06, 'triangle'); tone(440, t + .12, .2, .05, 'triangle'); }
 function sBad() { if (AC) tone(240, AC.currentTime, .3, .12, 'triangle', 140); }
 function sWin() { if (!AC) return; const t = AC.currentTime; [523, 659, 784, 1047].forEach((f, i) => tone(f, t + i * .1, .5, .07, 'triangle')); }
 function sEnd() { if (AC) { const t = AC.currentTime; [784, 659, 523].forEach((f, i) => tone(f, t + i * .14, .4, .08, 'triangle')); } }
@@ -487,7 +520,7 @@ function frame(now) {
   ctx.setTransform(dpr * scale, 0, 0, dpr * scale, 0, 0);
   ctx.fillStyle = '#2a1f4a'; ctx.fillRect(0, 0, W, H);
   drawHud(); drawClub(); drawBoard('in'); drawBoard('out'); drawDoorMonster(); drawBanner(); drawPanel(); drawConfetti(dt);
-  if (state === 'intro') card('Secret Door', ['The doorkeeper has a secret rule.', 'Look at who got IN and who stayed OUT.', 'Then call IN or OUT for each new monster.', `${STREAK} right in a row cracks the rule!`, 'Three hearts.'], "Let's go", 'draft 4  ·  sound on', 150);
+  if (state === 'intro') card('Secret Door', ['The doorkeeper has a secret rule.', 'Look at who got IN and who stayed OUT.', 'Then call IN or OUT for each new monster.', `${STREAK} right in a row cracks the rule!`, 'Three hearts.'], "Let's go", 'draft 5  ·  sound on', 150);
   if (state === 'over') card('No hearts left!', [rule ? 'The rule was:' : '', rule ? ruleText(rule) : '', `Rules cracked: ${score}   ·   ` + (score >= best && score > 0 ? 'a new best!' : `best ${best}`)], 'Play again', '', 170);
   if (Q.has('sheet')) {
     // A sheet of every feature, for screenshots.
@@ -507,7 +540,7 @@ startRun(); state = 'intro';
 if (Q.get('t')) { startRun(); const until = Number(Q.get('t')), wrongEvery = Number(Q.get('wrong') || 0); let n = 0; lives = 99; while (T < until) { if (door && !busy() && T - door.t > .5) { n++; call(wrongEvery && n % wrongEvery === 0 ? !ruleHolds(rule, door.m) : ruleHolds(rule, door.m)); } update(1 / 60); T += 1 / 60; } lives = Math.min(lives, LIVES); }
 if (Q.has('over')) { state = 'over'; score = 4; best = 6; }
 if (Q.get('door')) { state = 'play'; door = { m: { color: Q.get('door'), shape: Q.get('shape') || 'square', eyes: 3, horns: 'yes', pattern: 'spots', seed: 2 }, t: -9 }; anim = null; banner = null; }
-window.__sd = { rivals: () => rivals(boards), fairGuess, sameRule, ALL, hypotheses, startRun, update, call, autoPlay, makeRule, ruleHolds, ruleText, hintText, monsterFor, randomMonster, FEATS,
+window.__sd = { rivals: () => rivals(boards), settled, sameRule, ALL, hypotheses, startRun, update, call, autoPlay, makeRule, ruleHolds, ruleText, hintText, monsterFor, randomMonster, FEATS,
   get state() { return state; }, get lives() { return lives; }, set lives(v) { lives = v; }, get score() { return score; }, get rule() { return rule; },
   get door() { return door; }, get boards() { return boards; }, get streak() { return streak; }, get wrongs() { return wrongs; }, get ruleNo() { return ruleNo; },
   busy, tick: dt => { T += dt; update(dt); }, setRnd: f => rnd = f };
