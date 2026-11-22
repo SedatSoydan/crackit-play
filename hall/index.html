@@ -104,6 +104,7 @@ function baseScene() {
     plant: { present: true, dead: false },
     elevator: { open: 0, dark: false, lit: false },
     carpetBorder: true, figure: false, footprints: false, extraDoor: false,
+    npc: { speed: .55, backwards: false, stare: false, coat: '#a1242a' },
     len: ZF0, bigExtinguisher: false, floorText: '4TH FLOOR', uiSwap: false, uiLie: false, creep: false,
   };
 }
@@ -160,6 +161,12 @@ const ANOMALIES = [
   { id: 'dnd_gone', tier: 3, text: 'The DO NOT DISTURB sign was gone.', apply: s => { byId(s.doors, 'E').dnd = false; return hlDoor(byId(s.doors, 'E')); } },
   { id: 'painting_big', tier: 3, text: 'A painting was bigger.', apply: s => { const p = byId(s.paintings, 'PL'); p.big = true; p.z1 += .3; p.h1 += .07; return hlPainting(p); } },
   { id: 'sconce_missing', tier: 3, text: 'A wall lamp was missing.', apply: s => { const o = byId(s.sconces, 'R2'); o.present = false; return hlSconce(o); } },
+  // The bellboy.
+  { id: 'npc_stare', tier: 1, npc: true, text: 'The bellboy stopped and stared at you.', apply: s => { s.npc.stare = true; return npcMark(s, 0); } },
+  { id: 'npc_backwards', tier: 2, npc: true, text: 'The bellboy walked backwards.', apply: s => { s.npc.backwards = true; return npcMark(s, 0); } },
+  { id: 'npc_fast', tier: 2, npc: true, text: 'The bellboy walked far too fast.', apply: s => { s.npc.speed = 1.5; return npcMark(s, 0); } },
+  { id: 'npc_coat', tier: 2, npc: true, text: 'The bellboy wore a green coat.', apply: s => { s.npc.coat = '#2d6a3f'; return npcMark(s, 0); } },
+  { id: 'npc_slow', tier: 3, npc: true, text: 'The bellboy walked very slowly.', apply: s => { s.npc.speed = .22; return npcMark(s, 0); } },
 ];
 
 // ---------- drawing the hallway
@@ -523,6 +530,87 @@ function drawFigure(s) {
   ctx.beginPath(); ctx.ellipse(b[0] + sway, b[1] - 1.64 * k, .1 * k, .13 * k, 0, 0, 7); ctx.fill();
 }
 
+// ---------- the bellboy: pushes a luggage cart down the hall, the same way every time
+const NPC_X = .3, NPC_Z0 = 2.6, NPC_Z1 = 8.2, NPC_STOP = 5.0;
+function npcState(s, t) {
+  const n = s.npc, sp = n.speed;
+  let z, dist, moving = true, alpha = 1, facing = n.backwards ? 'front' : 'back';
+  if (n.stare) {
+    dist = Math.min(sp * t, NPC_STOP - NPC_Z0);
+    z = NPC_Z0 + dist;
+    if (dist >= NPC_STOP - NPC_Z0) { moving = false; if (t > (NPC_STOP - NPC_Z0) / sp + .8) facing = 'front'; }
+    alpha = Math.min(1, t / .6);
+  } else {
+    const len = NPC_Z1 - NPC_Z0, walk = len / sp, per = walk + 1.6, u = t % per;
+    dist = Math.min(len, sp * u);
+    z = NPC_Z0 + dist;
+    if (u > walk) { moving = false; alpha = Math.max(0, 1 - (u - walk) / 1.0); }
+    else alpha = Math.min(1, u / .6);
+  }
+  return { z, moving, alpha, facing, phase: dist / 1.4 * Math.PI * 2 };
+}
+function npcMark(s, t) { const st = npcState(s, t); return hl(proj(NPC_X, .45, st.z), .9 * K(st.z)); }
+
+function drawCart(x, z) {
+  const k = K(z);
+  fillPoly(flatQuad(x - .24, x + .24, z - .3, z + .3, .1), sh('#6b1e22', z));
+  fillPoly([proj(x - .24, .1, z - .3), proj(x + .24, .1, z - .3), proj(x + .24, .07, z - .3), proj(x - .24, .07, z - .3)], sh(BRASS, z));
+  ctx.strokeStyle = sh(BRASS, z, 1, 1.1); ctx.lineWidth = Math.max(.8, .025 * k);
+  const a = proj(x - .22, .1, z + .25), b = proj(x + .22, .1, z + .25), ta = proj(x - .22, .68, z + .25), tb = proj(x + .22, .68, z + .25);
+  ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(ta[0], ta[1]); ctx.quadraticCurveTo((ta[0] + tb[0]) / 2, ta[1] - .25 * k, tb[0], tb[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+  const c = proj(x, .1, z);
+  ctx.fillStyle = sh('#5a3a22', z); ctx.fillRect(c[0] - .2 * k, c[1] - .3 * k, .4 * k, .27 * k);
+  ctx.fillStyle = sh('#2c4060', z); ctx.fillRect(c[0] - .14 * k, c[1] - .52 * k, .3 * k, .22 * k);
+  ctx.fillStyle = sh('#c9a463', z, .9); ctx.fillRect(c[0] - .2 * k, c[1] - .18 * k, .4 * k, .02 * k); ctx.fillRect(c[0] - .02 * k, c[1] - .56 * k, .06 * k, .04 * k);
+  for (const dx of [-.2, .2]) { const w = proj(x + dx, 0, z - .25); ctx.fillStyle = sh('#111', z); ctx.beginPath(); ctx.arc(w[0], w[1] - .03 * k, .035 * k, 0, 7); ctx.fill(); }
+}
+
+function drawNPC(s) {
+  const st = npcState(s, hallT);
+  if (st.alpha <= 0) return;
+  const z = st.z, k = K(z), b = proj(NPC_X, 0, z), front = st.facing === 'front';
+  ctx.save(); ctx.globalAlpha = st.alpha;
+  drawCart(NPC_X + .02, z + .7);
+  ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.beginPath(); ctx.ellipse(b[0], b[1], .26 * k, .05 * k, 0, 0, 7); ctx.fill();
+  const sw = st.moving ? Math.sin(st.phase) : 0, bob = st.moving ? Math.abs(Math.cos(st.phase)) * .025 * k : 0;
+  const hipY = b[1] - .86 * k - bob, shY = b[1] - 1.42 * k - bob;
+  // Legs and shoes.
+  ctx.fillStyle = sh('#17151a', z);
+  for (const [dx, ph] of [[-.075, 1], [.075, -1]]) {
+    const foot = b[1] + ph * sw * .035 * k;
+    ctx.fillRect(b[0] + dx * k - .05 * k, hipY, .1 * k, foot - hipY);
+    ctx.beginPath(); ctx.ellipse(b[0] + dx * k, foot, .065 * k, .028 * k, 0, 0, 7); ctx.fill();
+  }
+  // Jacket.
+  ctx.fillStyle = sh(s.npc.coat, z);
+  ctx.beginPath(); ctx.moveTo(b[0] - .19 * k, hipY + .06 * k); ctx.lineTo(b[0] - .23 * k, shY + .04 * k); ctx.quadraticCurveTo(b[0], shY - .05 * k, b[0] + .23 * k, shY + .04 * k); ctx.lineTo(b[0] + .19 * k, hipY + .06 * k); ctx.closePath(); ctx.fill();
+  // Arms (reaching to the cart from behind; at the sides from the front).
+  ctx.fillStyle = sh(s.npc.coat, z, 1, .8);
+  for (const sg of [-1, 1]) { rrect(b[0] + sg * .2 * k - .045 * k, shY + .05 * k, .09 * k, (front ? .5 : .38) * k, .04 * k); ctx.fill(); }
+  if (front) {
+    ctx.fillStyle = sh('#efe6d4', z); ctx.beginPath(); ctx.moveTo(b[0] - .06 * k, shY + .02 * k); ctx.lineTo(b[0], shY + .16 * k); ctx.lineTo(b[0] + .06 * k, shY + .02 * k); ctx.fill();
+    ctx.fillStyle = sh('#e8c46a', z); for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.arc(b[0], shY + (.22 + i * .12) * k, .016 * k, 0, 7); ctx.fill(); }
+  } else {
+    ctx.fillStyle = sh('#000000', z, .18); ctx.fillRect(b[0] - .005 * k, shY + .1 * k, .01 * k, hipY - shY - .05 * k);
+  }
+  // Head, then the cap.
+  const hy = shY - .14 * k;
+  ctx.fillStyle = sh('#c99d7a', z); ctx.fillRect(b[0] - .035 * k, shY - .06 * k, .07 * k, .08 * k);
+  ctx.fillStyle = sh(front ? '#d2a684' : '#2a1a12', z); ctx.beginPath(); ctx.ellipse(b[0], hy, .095 * k, .115 * k, 0, 0, 7); ctx.fill();
+  if (front) {
+    const stare = s.npc.stare;
+    ctx.fillStyle = stare ? 'rgba(245,240,225,.95)' : sh('#1a1010', z);
+    for (const dx of [-.035, .035]) { ctx.beginPath(); ctx.arc(b[0] + dx * k, hy - .005 * k, (stare ? .016 : .011) * k, 0, 7); ctx.fill(); }
+    if (stare) { ctx.fillStyle = '#100808'; for (const dx of [-.035, .035]) { ctx.beginPath(); ctx.arc(b[0] + dx * k, hy - .005 * k, .006 * k, 0, 7); ctx.fill(); } }
+    ctx.strokeStyle = sh('#6a3a30', z); ctx.lineWidth = Math.max(.5, .01 * k); ctx.beginPath(); ctx.moveTo(b[0] - .03 * k, hy + .055 * k); ctx.lineTo(b[0] + .03 * k, hy + .055 * k); ctx.stroke();
+  } else {
+    ctx.fillStyle = sh('#c99d7a', z); for (const sg of [-1, 1]) { ctx.beginPath(); ctx.ellipse(b[0] + sg * .095 * k, hy, .018 * k, .03 * k, 0, 0, 7); ctx.fill(); }
+  }
+  ctx.fillStyle = sh('#a1242a', z, 1, 1.05); ctx.fillRect(b[0] - .08 * k, hy - .17 * k, .16 * k, .08 * k);
+  ctx.fillStyle = sh('#e8c46a', z); ctx.fillRect(b[0] - .08 * k, hy - .105 * k, .16 * k, .015 * k);
+  ctx.restore();
+}
+
 function drawScene(s) {
   ZF = s.len;
   drawShell(s);
@@ -541,6 +629,7 @@ function drawScene(s) {
   items.push([s.tray.z, () => drawTray(s)]);
   items.push([1.18, () => drawPlant(s)]);
   items.push([7.8, () => drawFigure(s)]);
+  items.push([npcState(s, hallT).z, () => drawNPC(s)]);
   items.push([s.exitSign.z, () => drawExitSign(s)]);
   items.sort((a, b) => b[0] - a[0]);
   for (const [, fn] of items) fn();
@@ -668,6 +757,7 @@ function decide(turnBack) {
   if (!right) {
     stats.wrong++;
     wasWrongType = anomaly ? 'missed' : 'false';
+    if (anomaly && anomaly.npc) mark = npcMark(scene, hallT);
     state = 'reveal'; revealT = 0; sWrong();
     if (anomaly && mark) focusOn(mark.x, mark.y, mark.r > 70 ? 1.3 : 1.8);
     return;
@@ -989,6 +1079,7 @@ const Q = new URLSearchParams(location.search);
 if (Q.get('a')) { state = 'hall'; hall = 3; makeHall(3, Q.get('a')); }
 if (Q.get('study') !== null && Q.get('study') !== undefined && Q.has && Q.has('study')) { state = 'hall'; hall = 0; makeHall(0); }
 if (Q.get('reveal')) { state = 'reveal'; hall = 3; makeHall(3, Q.get('reveal')); wasWrongType = 'missed'; revealT = 2; }
+if (Q.get('t')) hallT = Number(Q.get('t'));
 if (Q.get('reveal') && mark) { focusOn(mark.x, mark.y, mark.r > 70 ? 1.3 : 1.8); Object.assign(cam, camTo); }
 if (Q.get('zoom')) { const [zz, zx, zy] = Q.get('zoom').split(',').map(Number); focusOn(zx, zy, zz); Object.assign(cam, camTo); }
 if (Q.has && Q.has('win')) { state = 'win'; stats = { halls: 11, wrong: 2, t0: 0, t1: 134000 }; }
