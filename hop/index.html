@@ -12,12 +12,12 @@ canvas{display:block;margin:0 auto}
 <body>
 <canvas id="c"></canvas>
 <script>
-// Hop & Pop, draft 2: two lanes at once. Left: hop the bunny over the logs.
+// Hop & Pop, draft 3: two lanes at once. Left: hop the bunny over the logs.
 // Right: pop the target fruit before it lands, and never tap a bee.
 const W = 360, H = 640, LANE_TOP = 78, GROUND = 560, MID = 180, LIVES = 3;
 const BUNNY_X = 90, BUNNY_Y = 540, HOP_TIME = .62, HOP_H = 56, FRUIT_TOP = 96, FRUIT_FLOOR = 586;
 const GAP = .6;            // seconds kept between a hop moment and a target fruit's landing
-const SWITCH_FROM = 30, SWITCH_EVERY = 20, GRACE = 1.2, SAFE = 1.0;
+const SWITCH_FROM = 30, SWITCH_EVERY = 20, GRACE = 1.2, SAFE = 1.0, SWITCH_PAUSE = 1.2, BANNER = 2.0;
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 let scale = 1, dpr = 1;
 function resize() {
@@ -42,12 +42,12 @@ function targetAt(e) { return e < SWITCH_FROM ? 'apple' : (Math.floor((e - SWITC
 // ---------- state
 let state = 'intro', T = 0, el = 0, lives = LIVES, score = 0, best = 0;
 let hopT = -9, safeUntil = -9, logs = [], items = [], nextLog = 0, nextFruit = 0, lastTarget = 'apple', switchAt = -9;
-let why = '', whyAt = -9, pops = [], bumps = [], sinceBee = 0, dist = 0;
+let why = '', whyAt = -9, pops = [], bumps = [], puffs = [], sinceBee = 0, dist = 0, signFlash = -9;
 try { best = Number(localStorage.getItem('hopandpop_best') || 0); } catch (e) { /* storage off */ }
 
 function startRun() {
   state = 'play'; el = 0; lives = LIVES; score = 0; hopT = -9; safeUntil = -9;
-  logs = []; items = []; pops = []; bumps = []; nextLog = 1.2; nextFruit = .6; lastTarget = 'apple'; switchAt = -9; why = ''; sinceBee = 0; dist = 0;
+  logs = []; items = []; pops = []; bumps = []; nextLog = 1.2; nextFruit = .6; lastTarget = 'apple'; switchAt = -9; why = ''; sinceBee = 0; dist = 0; puffs = []; signFlash = -9;
 }
 
 // When a log meets the bunny, and when a fruit lands, in run seconds.
@@ -110,7 +110,8 @@ function tapRight(x, y) {
   // Just after a switch, the old target is forgiven (no point, no heart).
   if (el - switchAt < GRACE) { pops.push({ x: p[0], y: p[1], t: T, kind: bestF.kind }); return; }
   bumps.push({ x: p[0], y: p[1], t: T });
-  lose(`Not that one: pop the ${target}s.`);
+  signFlash = T;
+  lose(`Leave the ${bestF.kind}s now: pop the ${target}s!`);
 }
 function itemPos(f) {
   const y = FRUIT_TOP + (el - f.t0) * f.v;
@@ -124,7 +125,12 @@ function update(dt) {
   dist += logSpeed(el) * dt;
   spawn();
   const target = targetAt(el);
-  if (target !== lastTarget) { lastTarget = target; switchAt = el; sSwitch(); }
+  if (target !== lastTarget) {
+    lastTarget = target; switchAt = el; sSwitch();
+    // Clear the air: every fruit still falling puffs away, so none is in doubt.
+    for (const f of items) if (!f.done && f.kind !== 'bee') { const p = itemPos(f); f.done = true; f.puffed = true; puffs.push({ x: p[0], y: p[1], t: T }); }
+    nextFruit = Math.max(nextFruit, el + SWITCH_PAUSE);
+  }
   // Logs: a bump when one meets the bunny on the ground.
   for (const l of logs) {
     if (l.hit || l.hopped) continue;
@@ -141,7 +147,7 @@ function update(dt) {
     if (f.done) continue;
     if (itemPos(f)[1] >= FRUIT_FLOOR) {
       f.done = true;
-      if (f.kind !== 'bee' && f.kind === targetAt(el) && el - switchAt >= GRACE) { lose(`A${f.kind === 'apple' ? 'n apple' : ' pear'} fell down.`); if (state !== 'play') return; }
+      if (f.kind !== 'bee' && f.kind === targetAt(el) && el - switchAt >= GRACE) { signFlash = T; lose(`A${f.kind === 'apple' ? 'n apple' : ' pear'} fell: pop the ${f.kind}s!`); if (state !== 'play') return; }
     }
   }
   items = items.filter(f => !f.done || itemPos(f)[1] < FRUIT_FLOOR + 30);
@@ -376,12 +382,12 @@ function drawCanopy() {
 
 function drawSign() {
   // A wooden sign hanging from the branches; it swings when the target changes.
-  const target = targetAt(el), since = el - switchAt, fresh = since < 1.6;
-  const swing = fresh ? Math.sin(since * 9) * .14 * (1 - since / 1.6) : Math.sin(T * 1.3) * .015;
+  const target = targetAt(el), since = el - switchAt, fresh = since < 1.6 || T - signFlash < .9;
+  const swing = since < 1.6 ? Math.sin(since * 9) * .14 * (1 - since / 1.6) : T - signFlash < .9 ? Math.sin((T - signFlash) * 18) * .08 : Math.sin(T * 1.3) * .015;
   ctx.save(); ctx.translate(271, LANE_TOP + 22); ctx.rotate(swing);
   ctx.strokeStyle = '#a07850'; ctx.lineWidth = 1.6;
   ctx.beginPath(); ctx.moveTo(-40, -6); ctx.lineTo(-40, 18); ctx.moveTo(40, -6); ctx.lineTo(40, 18); ctx.stroke();
-  if (fresh) { ctx.fillStyle = `rgba(255,220,90,${.5 * (1 - since / 1.6)})`; rrect(-70, 10, 140, 50, 16); ctx.fill(); }
+  if (fresh) { ctx.fillStyle = `rgba(255,220,90,${.5 + .3 * Math.sin(T * 14)})`; rrect(-70, 10, 140, 50, 16); ctx.fill(); }
   ctx.fillStyle = 'rgba(70,40,20,.25)'; rrect(-62, 18, 124, 40, 10); ctx.fill();
   ctx.fillStyle = lin(0, 14, 0, 54, [[0, '#f1cf98'], [1, '#d9a866']]); rrect(-62, 14, 124, 40, 10); ctx.fill();
   ctx.strokeStyle = '#b8834c'; ctx.lineWidth = 1.5; ctx.stroke();
@@ -410,6 +416,21 @@ function drawRight() {
   }
   drawCanopy();
   drawSign();
+  const sinceSwitch = el - switchAt;
+  if (sinceSwitch < BANNER && switchAt > 0) {
+    const a = Math.min(1, sinceSwitch * 6, (BANNER - sinceSwitch) * 4), pop = 1 + .15 * Math.max(0, 1 - sinceSwitch * 4);
+    const target = targetAt(el), cx = MID + (W - MID) / 2, cy = 330;
+    ctx.save(); ctx.globalAlpha = a; ctx.translate(cx, cy); ctx.scale(pop, pop);
+    ctx.fillStyle = 'rgba(70,40,20,.2)'; rrect(-78, -62, 156, 132, 22); ctx.fill();
+    ctx.fillStyle = lin(0, -66, 0, 62, [[0, '#fffbe8'], [1, '#ffeec2']]); rrect(-78, -66, 156, 132, 22); ctx.fill();
+    ctx.strokeStyle = '#ff9a2a'; ctx.lineWidth = 3; ctx.stroke();
+    ctx.textAlign = 'center'; ctx.fillStyle = '#7a4a1e'; ctx.font = '800 15px "Trebuchet MS", system-ui, sans-serif';
+    ctx.fillText('Now pop the', 0, -40);
+    drawFruit(target, 0, 2, 1.9 + .1 * Math.sin(T * 10));
+    ctx.fillStyle = target === 'pear' ? '#7a9a1e' : '#d8302c'; ctx.font = '900 22px "Trebuchet MS", system-ui, sans-serif';
+    ctx.fillText(target === 'pear' ? 'PEARS!' : 'APPLES!', 0, 54);
+    ctx.restore();
+  }
   ctx.restore();
 }
 
@@ -433,7 +454,11 @@ function drawEffects() {
       ctx.fillStyle = `rgba(255,200,60,${1 - u})`; starPath(b.x + Math.cos(a) * r, b.y - 10 + Math.sin(a) * r * .4, 4); ctx.fill();
     }
   }
-  pops = pops.filter(p => T - p.t < .55); bumps = bumps.filter(b => T - b.t < .6);
+  for (const p of puffs) {
+    const u = (T - p.t) / .5; if (u > 1) continue;
+    for (let j = 0; j < 6; j++) { const a = j / 6 * TAU, r = 4 + u * 16; ell(p.x + Math.cos(a) * r, p.y + Math.sin(a) * r - u * 6, 5 * (1 - u) + 1, 5 * (1 - u) + 1, `rgba(255,255,255,${.9 * (1 - u)})`); }
+  }
+  pops = pops.filter(p => T - p.t < .55); bumps = bumps.filter(b => T - b.t < .6); puffs = puffs.filter(p => T - p.t < .5);
 }
 function starPath(x, y, r) { ctx.beginPath(); for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, q = i % 2 ? r * .45 : r; ctx.lineTo(x + Math.cos(a) * q, y + Math.sin(a) * q); } ctx.closePath(); }
 
@@ -552,7 +577,7 @@ function frame(now) {
   update(dt);
   ctx.setTransform(dpr * scale, 0, 0, dpr * scale, 0, 0);
   drawLeft(); drawRight(); drawEffects(); drawHud(); drawFoot();
-  if (state === 'intro') card('Hop & Pop', ['Two games at once!', 'Left: tap to hop the bunny over the logs.', 'Right: tap the fruit on the sign before it', 'lands. Never tap a bee!', 'Three hearts.'], "Let's go", 'draft 2  ·  sound on', 150);
+  if (state === 'intro') card('Hop & Pop', ['Two games at once!', 'Left: tap to hop the bunny over the logs.', 'Right: pop the fruit on the sign before it', 'lands. Leave the other fruit and the bees.', 'Watch the sign: it changes!'], "Let's go", 'draft 3  ·  sound on', 150);
   if (state === 'over') card('No hearts left!', [why, `Score: ${score}   ·   ` + (score >= best && score > 0 ? 'a new best!' : `best ${best}`), `You lasted ${Math.floor(el)} seconds.`], 'Play again', '', 190);
   requestAnimationFrame(frame);
 }
@@ -565,7 +590,7 @@ function autoPlay() {
   for (const l of logs) { const y = LANE_TOP + (el - l.t0) * l.v; if (!l.hopped && !l.hit && y > BUNNY_Y - 14 - l.v * HOP_TIME * .45 && y < BUNNY_Y - 14) hop(); }
   for (const f of items) { if (!f.done && f.kind === targetAt(el) && itemPos(f)[1] > 300) { const p = itemPos(f); tapRight(p[0], p[1]); } }
 }
-window.__hp = { startRun, update, hop, tapRight, autoPlay, itemPos, logArrival, fruitLanding, targetAt, logSpeed, fruitSpeed, GAP,
+window.__hp = { get why() { return why; }, get switchAt() { return switchAt; }, startRun, update, hop, tapRight, autoPlay, itemPos, logArrival, fruitLanding, targetAt, logSpeed, fruitSpeed, GAP,
   get state() { return state; }, get lives() { return lives; }, set lives(v) { lives = v; }, get score() { return score; }, get el() { return el; },
   get logs() { return logs; }, get items() { return items; }, setRnd: f => rnd = f };
 requestAnimationFrame(frame);
