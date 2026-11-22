@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Hop & Pop</title>
+<style>
+html,body{margin:0;height:100%;background:#eef8e8;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none}
+canvas{display:block;margin:0 auto}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Hop & Pop, draft 1: two lanes at once. Left: hop the bunny over the logs.
+// Right: pop the target fruit before it lands, and never tap a bee.
+const W = 360, H = 640, LANE_TOP = 78, GROUND = 560, MID = 180, LIVES = 3;
+const BUNNY_X = 90, BUNNY_Y = 540, HOP_TIME = .62, HOP_H = 56, FRUIT_TOP = 96, FRUIT_FLOOR = 586;
+const GAP = .6;            // seconds kept between a hop moment and a target fruit's landing
+const SWITCH_FROM = 30, SWITCH_EVERY = 20, GRACE = 1.2, SAFE = 1.0;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let scale = 1, dpr = 1;
+function resize() {
+  dpr = window.devicePixelRatio || 1;
+  scale = Math.min(innerWidth / W, innerHeight / H);
+  cv.style.width = W * scale + 'px'; cv.style.height = H * scale + 'px';
+  cv.width = Math.round(W * scale * dpr); cv.height = Math.round(H * scale * dpr);
+}
+addEventListener('resize', resize); resize();
+function mulberry(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const Q = new URLSearchParams(location.search);
+let rnd = mulberry(Q.get('seed') ? Number(Q.get('seed')) : (Date.now() % 1e9) | 0);
+const TAU = Math.PI * 2;
+
+// ---------- difficulty by seconds played
+function logSpeed(e) { return Math.min(300, 150 + 2.2 * e); }
+function logGap(e) { return Math.max(1.0, 2.4 - e * .02) + rnd() * .8; }
+function fruitSpeed(e) { return Math.min(140, 55 + 1.2 * e); }
+function fruitGap(e) { return Math.max(.55, 1.5 - e * .012) + rnd() * .4; }
+function targetAt(e) { return e < SWITCH_FROM ? 'apple' : (Math.floor((e - SWITCH_FROM) / SWITCH_EVERY) % 2 === 0 ? 'pear' : 'apple'); }
+
+// ---------- state
+let state = 'intro', T = 0, el = 0, lives = LIVES, score = 0, best = 0;
+let hopT = -9, safeUntil = -9, logs = [], items = [], nextLog = 0, nextFruit = 0, lastTarget = 'apple', switchAt = -9;
+let why = '', whyAt = -9, pops = [], bumps = [], sinceBee = 0;
+try { best = Number(localStorage.getItem('hopandpop_best') || 0); } catch (e) { /* storage off */ }
+
+function startRun() {
+  state = 'play'; el = 0; lives = LIVES; score = 0; hopT = -9; safeUntil = -9;
+  logs = []; items = []; pops = []; bumps = []; nextLog = 1.2; nextFruit = .6; lastTarget = 'apple'; switchAt = -9; why = ''; sinceBee = 0;
+}
+
+// When a log meets the bunny, and when a fruit lands, in run seconds.
+function logArrival(l) { return l.t0 + (BUNNY_Y - LANE_TOP) / l.v; }
+function fruitLanding(f) { return f.t0 + (FRUIT_FLOOR - FRUIT_TOP) / f.v; }
+function clashes(t) { return logs.some(l => Math.abs(logArrival(l) - t) < GAP); }
+
+function spawn() {
+  while (el >= nextLog) {
+    const l = { t0: nextLog, v: logSpeed(nextLog), hopped: false, hit: false };
+    // A log must not meet the bunny near a target fruit's landing: wait a little.
+    if (targetClash(logArrival(l))) { nextLog += .25; continue; }
+    logs.push(l);
+    nextLog += logGap(nextLog);
+  }
+  while (el >= nextFruit) {
+    const t0 = nextFruit, v = fruitSpeed(t0), target = targetAt(t0 + (FRUIT_FLOOR - FRUIT_TOP) / v);
+    let kind;
+    const r = rnd();
+    // A bee at least every sixth item, so the right lane always asks for care.
+    if (r < (t0 < 15 ? .22 : .3) || sinceBee >= 5) kind = 'bee';
+    else if (t0 >= 15 && r < .55) kind = target === 'apple' ? 'pear' : 'apple';
+    else kind = target;
+    const f = { t0, v, kind, x: MID + 28 + rnd() * (W - MID - 56), done: false, wob: rnd() * TAU };
+    // A fruit to pop must not land near a hop moment; a later log is checked when it spawns.
+    if (kind === target && clashes(fruitLanding(f))) { nextFruit += .25; continue; }
+    items.push(f);
+    sinceBee = kind === 'bee' ? 0 : sinceBee + 1;
+    nextFruit += fruitGap(t0);
+  }
+}
+
+function targetClash(t) { return items.some(f => f.kind === targetAt(fruitLanding(f)) && Math.abs(fruitLanding(f) - t) < GAP); }
+
+function lose(reason) {
+  lives--; why = reason; whyAt = T; sLose();
+  if (lives <= 0) endRun();
+}
+function endRun() {
+  state = 'over'; sEnd();
+  if (score > best) { best = score; try { localStorage.setItem('hopandpop_best', String(best)); } catch (e) { /* storage off */ } }
+}
+
+function bunnyHeight() { const u = (el - hopT) / HOP_TIME; return u >= 0 && u <= 1 ? HOP_H * Math.sin(Math.PI * u) : 0; }
+function hop() { if (state !== 'play') return; if (el - hopT >= HOP_TIME) { hopT = el; sHop(); } }
+function tapRight(x, y) {
+  if (state !== 'play') return;
+  let bestF = null, bestD = 30;
+  for (const f of items) {
+    if (f.done) continue;
+    const p = itemPos(f), d = Math.hypot(p[0] - x, p[1] - y);
+    if (d < bestD) { bestD = d; bestF = f; }
+  }
+  if (!bestF) return;
+  const p = itemPos(bestF);
+  bestF.done = true;
+  if (bestF.kind === 'bee') { bumps.push({ x: p[0], y: p[1], t: T }); lose('That was a bee!'); return; }
+  const target = targetAt(el);
+  if (bestF.kind === target) { score++; pops.push({ x: p[0], y: p[1], t: T, kind: bestF.kind }); sPop(); return; }
+  // Just after a switch, the old target is forgiven (no point, no heart).
+  if (el - switchAt < GRACE) { pops.push({ x: p[0], y: p[1], t: T, kind: bestF.kind }); return; }
+  bumps.push({ x: p[0], y: p[1], t: T });
+  lose(`Not that one: pop the ${target}s.`);
+}
+function itemPos(f) {
+  const y = FRUIT_TOP + (el - f.t0) * f.v;
+  const x = f.kind === 'bee' ? f.x + Math.sin(el * 5 + f.wob) * 12 : f.x;
+  return [x, y];
+}
+
+function update(dt) {
+  if (state !== 'play') return;
+  el += dt;
+  spawn();
+  const target = targetAt(el);
+  if (target !== lastTarget) { lastTarget = target; switchAt = el; sSwitch(); }
+  // Logs: a bump when one meets the bunny on the ground.
+  for (const l of logs) {
+    if (l.hit || l.hopped) continue;
+    const y = LANE_TOP + (el - l.t0) * l.v;
+    if (y >= BUNNY_Y - 14 && y <= BUNNY_Y + 10) {
+      if (bunnyHeight() > 16) { l.hopped = true; score++; }
+      else if (el >= safeUntil) { l.hit = true; safeUntil = el + SAFE; bumps.push({ x: BUNNY_X, y: BUNNY_Y, t: T }); lose('The bunny bumped a log.'); if (state !== 'play') return; }
+      else l.hopped = true;
+    }
+  }
+  logs = logs.filter(l => LANE_TOP + (el - l.t0) * l.v < H + 40);
+  // Fruit: a target that lands costs a heart.
+  for (const f of items) {
+    if (f.done) continue;
+    if (itemPos(f)[1] >= FRUIT_FLOOR) {
+      f.done = true;
+      if (f.kind !== 'bee' && f.kind === targetAt(el) && el - switchAt >= GRACE) { lose(`A${f.kind === 'apple' ? 'n apple' : ' pear'} fell down.`); if (state !== 'play') return; }
+    }
+  }
+  items = items.filter(f => !f.done || itemPos(f)[1] < FRUIT_FLOOR + 30);
+}
+
+// ---------- drawing
+function rrect(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+function ell(x, y, rx, ry, col, rot = 0) { ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(x, y, rx, ry, rot, 0, TAU); ctx.fill(); }
+
+function drawLeft() {
+  ctx.save(); ctx.beginPath(); ctx.rect(0, LANE_TOP, MID - 2, GROUND + 40 - LANE_TOP); ctx.clip();
+  const g = ctx.createLinearGradient(0, LANE_TOP, 0, H); g.addColorStop(0, '#bfe6a8'); g.addColorStop(1, '#8fd07a');
+  ctx.fillStyle = g; ctx.fillRect(0, LANE_TOP, MID, H);
+  // The path, scrolling down.
+  ctx.fillStyle = '#e8c99a'; ctx.fillRect(34, LANE_TOP, 112, H);
+  ctx.fillStyle = 'rgba(180,140,90,.35)';
+  const scroll = (el * logSpeed(el)) % 60;
+  for (let y = LANE_TOP - 60 + scroll; y < H; y += 60) { ctx.fillRect(52, y, 6, 14); ctx.fillRect(120, y + 30, 6, 14); }
+  // Bushes on the sides.
+  for (let y = LANE_TOP - 80 + (el * logSpeed(el) * .9) % 80; y < H; y += 80) { ell(14, y, 18, 22, '#6dbb5a'); ell(166, y + 40, 18, 22, '#6dbb5a'); }
+  // Logs.
+  for (const l of logs) {
+    if (l.hit) continue;
+    const y = LANE_TOP + (el - l.t0) * l.v;
+    ctx.fillStyle = '#8a5a34'; rrect(42, y - 12, 96, 24, 12); ctx.fill();
+    ctx.fillStyle = '#a8703f'; rrect(42, y - 12, 96, 9, 6); ctx.fill();
+    ell(46, y, 6, 12, '#d9a86a'); ctx.strokeStyle = '#a8703f'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.ellipse(46, y, 3, 6, 0, 0, TAU); ctx.stroke();
+  }
+  // The bunny and its shadow.
+  const h = bunnyHeight(), blink = el < safeUntil && Math.floor(T * 12) % 2 === 0;
+  ell(BUNNY_X, BUNNY_Y + 16, 20 - h * .12, 5, 'rgba(60,90,40,.25)');
+  if (!blink) drawBunny(BUNNY_X, BUNNY_Y - h, h > 4);
+  ctx.restore();
+}
+
+function drawBunny(x, y, air) {
+  ctx.save(); ctx.translate(x, y);
+  ell(0, 4, 17, 14, '#ffffff');
+  ell(-7, -12, 5, 15, '#ffffff', -.15); ell(7, -12, 5, 15, '#ffffff', .15);
+  ell(-7, -12, 2.5, 10, '#ffc2cf', -.15); ell(7, -12, 2.5, 10, '#ffc2cf', .15);
+  ell(0, 0, 12, 11, '#ffffff');
+  ctx.fillStyle = '#2a1a1a'; ctx.beginPath(); ctx.arc(-4.5, -1, 1.8, 0, TAU); ctx.arc(4.5, -1, 1.8, 0, TAU); ctx.fill();
+  ell(0, 3, 2.2, 1.6, '#ff8fa3');
+  ell(-7, 4, 2.6, 1.8, 'rgba(255,140,160,.45)'); ell(7, 4, 2.6, 1.8, 'rgba(255,140,160,.45)');
+  if (air) { ell(-9, 17, 5, 3, '#f1f1f1'); ell(9, 17, 5, 3, '#f1f1f1'); } else { ell(-8, 16, 6, 3.2, '#f1f1f1'); ell(8, 16, 6, 3.2, '#f1f1f1'); }
+  ctx.restore();
+}
+
+function drawFruit(kind, x, y, s = 1) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+  if (kind === 'apple') {
+    ell(-5, 2, 11, 12, '#e8433f'); ell(5, 2, 11, 12, '#e8433f'); ell(-4, -3, 4, 3, 'rgba(255,255,255,.4)', -.5);
+    ctx.strokeStyle = '#6a4024'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, -8); ctx.lineTo(1, -15); ctx.stroke();
+    ell(6, -13, 5, 2.5, '#5cb85c', -.4);
+  } else if (kind === 'pear') {
+    ell(0, 5, 12, 11, '#c5d94a'); ell(0, -5, 7, 9, '#c5d94a'); ell(-3, 0, 3, 5, 'rgba(255,255,255,.35)', -.3);
+    ctx.strokeStyle = '#6a4024'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, -13); ctx.lineTo(2, -19); ctx.stroke();
+    ell(7, -16, 5, 2.5, '#5cb85c', -.4);
+  } else {
+    // A bee: striped body, wings, a stinger.
+    ell(-4, -9, 7, 5, 'rgba(220,240,255,.85)', -.4); ell(4, -9, 7, 5, 'rgba(220,240,255,.85)', .4);
+    ell(0, 0, 13, 9, '#ffcf3a');
+    ctx.fillStyle = '#2a2220'; ctx.fillRect(-4, -8.5, 3.5, 17); ctx.fillRect(3, -8, 3.5, 16);
+    ctx.beginPath(); ctx.moveTo(12, 0); ctx.lineTo(17, -1.5); ctx.lineTo(17, 1.5); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.arc(-9, -2, 1.6, 0, TAU); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawRight() {
+  ctx.save(); ctx.beginPath(); ctx.rect(MID + 2, LANE_TOP, W - MID - 2, GROUND + 40 - LANE_TOP); ctx.clip();
+  const g = ctx.createLinearGradient(0, LANE_TOP, 0, H); g.addColorStop(0, '#d8f1ff'); g.addColorStop(1, '#eafbe0');
+  ctx.fillStyle = g; ctx.fillRect(MID, LANE_TOP, W - MID, H);
+  // Leaves at the top, grass at the bottom.
+  for (let i = 0; i < 7; i++) ell(MID + 6 + i * 30, LANE_TOP + 6, 22, 16, i % 2 ? '#6dbb5a' : '#5aa84a');
+  ctx.fillStyle = '#8fd07a'; ctx.fillRect(MID, FRUIT_FLOOR + 8, W - MID, 60);
+  for (const f of items) { if (f.done) continue; const p = itemPos(f); drawFruit(f.kind, p[0], p[1]); }
+  // The target sign.
+  const target = targetAt(el), fresh = el - switchAt < 1.6;
+  ctx.fillStyle = fresh ? 'rgba(255,240,180,.97)' : 'rgba(255,255,255,.9)'; rrect(MID + 30, LANE_TOP + 26, 120, 40, 20); ctx.fill();
+  ctx.strokeStyle = fresh ? '#ff9a2a' : 'rgba(90,160,80,.5)'; ctx.lineWidth = fresh ? 2.5 : 1.2; ctx.stroke();
+  ctx.fillStyle = '#4a6a3a'; ctx.font = '700 15px "Trebuchet MS", system-ui, sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText('Pop the', MID + 44, LANE_TOP + 51);
+  drawFruit(target, MID + 124, LANE_TOP + 46, fresh ? 1 + .12 * Math.sin(T * 12) : 1);
+  ctx.restore();
+}
+
+function drawEffects() {
+  for (const p of pops) {
+    const u = (T - p.t) / .45; if (u > 1) continue;
+    for (let j = 0; j < 8; j++) { const a = j / 8 * TAU, r = 6 + u * 26; ell(p.x + Math.cos(a) * r, p.y + Math.sin(a) * r, 3 * (1 - u) + .5, 3 * (1 - u) + .5, p.kind === 'pear' ? '#c5d94a' : '#ff7a6a'); }
+  }
+  for (const b of bumps) {
+    const u = (T - b.t) / .5; if (u > 1) continue;
+    ctx.strokeStyle = `rgba(255,90,80,${1 - u})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(b.x, b.y, 14 + u * 22, 0, TAU); ctx.stroke();
+  }
+  pops = pops.filter(p => T - p.t < .45); bumps = bumps.filter(b => T - b.t < .5);
+}
+
+function heart(x, y, r, full) {
+  ctx.beginPath(); ctx.moveTo(x, y + r * .9);
+  ctx.bezierCurveTo(x - r * 1.6, y - r * .2, x - r * .7, y - r * 1.3, x, y - r * .45);
+  ctx.bezierCurveTo(x + r * .7, y - r * 1.3, x + r * 1.6, y - r * .2, x, y + r * .9);
+  ctx.fillStyle = full ? '#ff6f7a' : '#d7e6d2'; ctx.fill();
+}
+
+function drawHud() {
+  ctx.fillStyle = '#fbfff6'; ctx.fillRect(0, 0, W, LANE_TOP);
+  ctx.fillStyle = '#ff8c2a'; ctx.font = '700 13px "Trebuchet MS", system-ui, sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('H O P   &   P O P', 180, 24);
+  ctx.fillStyle = '#3f7a35'; ctx.font = '700 32px "Trebuchet MS", system-ui, sans-serif'; ctx.fillText(String(score), 180, 60);
+  for (let i = 0; i < LIVES; i++) heart(30 + i * 24, 48, 8, i < lives);
+  ctx.fillStyle = '#9ab09a'; ctx.font = '11px system-ui, sans-serif'; ctx.textAlign = 'right';
+  ctx.fillText(state === 'intro' ? '' : `${Math.floor(el)} s`, 340, 52); ctx.textAlign = 'center';
+  // The middle line.
+  ctx.fillStyle = '#fbfff6'; ctx.fillRect(MID - 2, LANE_TOP, 4, H);
+}
+
+function drawFoot() {
+  ctx.fillStyle = '#fbfff6'; ctx.fillRect(0, GROUND + 40, W, H);
+  ctx.textAlign = 'center';
+  if (state === 'play' && T - whyAt < 1.6 && why) {
+    ctx.fillStyle = '#e0553f'; ctx.font = '700 14px "Trebuchet MS", system-ui, sans-serif'; ctx.fillText(why, 180, 622);
+  } else if (state === 'play') {
+    ctx.fillStyle = '#7a947a'; ctx.font = '600 12px "Trebuchet MS", system-ui, sans-serif';
+    ctx.fillText('tap here to hop', 90, 622); ctx.fillText('tap the fruit', 270, 622);
+  }
+}
+
+function button(x, y, w, h, label) {
+  ctx.fillStyle = '#3f9e62'; rrect(x, y + 5, w, h, 26); ctx.fill();
+  ctx.fillStyle = '#5fc282'; rrect(x, y, w, h, 26); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,.22)'; rrect(x + 5, y + 4, w - 10, h * .4, 20); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.font = '700 20px "Trebuchet MS", system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(label, x + w / 2, y + h / 2 + 1); ctx.textBaseline = 'alphabetic';
+}
+let btnY = 0;
+function card(title, lines, btn, note, y0) {
+  const h = 76 + lines.length * 22 + 74 + (note ? 18 : 0);
+  ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = 'rgba(60,100,50,.18)'; rrect(26, y0 + 8, 308, h, 26); ctx.fill();
+  ctx.fillStyle = '#fffdf6'; rrect(26, y0, 308, h, 26); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,140,42,.5)'; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.textAlign = 'center'; ctx.fillStyle = '#ff8c2a'; ctx.font = '700 28px "Trebuchet MS", system-ui, sans-serif'; ctx.fillText(title, 180, y0 + 44);
+  ctx.fillStyle = '#4a5a4a'; ctx.font = '14px system-ui, sans-serif';
+  lines.forEach((l, i) => ctx.fillText(l, 180, y0 + 76 + i * 22));
+  btnY = y0 + 76 + lines.length * 22;
+  button(80, btnY, 200, 56, btn);
+  if (note) { ctx.fillStyle = '#9ab09a'; ctx.font = '11px system-ui, sans-serif'; ctx.fillText(note, 180, btnY + 82); }
+}
+
+// ---------- sound
+let AC = null, master = null;
+function audio() {
+  if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+  try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return; }
+  master = AC.createGain(); master.gain.value = .6; master.connect(AC.destination);
+}
+function tone(f, when, dur, vol, type = 'sine', to = 0) {
+  if (!AC) return;
+  const o = AC.createOscillator(), g = AC.createGain(); o.type = type; o.frequency.setValueAtTime(f, when);
+  if (to) o.frequency.exponentialRampToValueAtTime(to, when + dur);
+  g.gain.setValueAtTime(0, when); g.gain.linearRampToValueAtTime(vol, when + .012); g.gain.exponentialRampToValueAtTime(.0005, when + dur);
+  o.connect(g); g.connect(master); o.start(when); o.stop(when + dur + .05);
+}
+function sHop() { if (AC) tone(300, AC.currentTime, .22, .1, 'sine', 620); }
+function sPop() { if (AC) { const t = AC.currentTime; tone(900, t, .08, .1, 'triangle', 1400); tone(1600, t + .03, .1, .04); } }
+function sLose() { if (AC) tone(240, AC.currentTime, .3, .12, 'triangle', 140); }
+function sSwitch() { if (AC) { const t = AC.currentTime; tone(660, t, .2, .06, 'triangle'); tone(880, t + .12, .25, .06, 'triangle'); } }
+function sEnd() { if (AC) { const t = AC.currentTime; [784, 659, 523].forEach((f, i) => tone(f, t + i * .14, .4, .08, 'triangle')); } }
+function sClick() { if (AC) tone(880, AC.currentTime, .04, .05, 'triangle'); }
+
+// ---------- input
+function pagePos(e) { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) / scale, (e.clientY - r.top) / scale]; }
+cv.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  const [x, y] = pagePos(e);
+  audio();
+  if (state === 'intro' || state === 'over') {
+    if (x >= 80 && x <= 280 && y >= btnY && y <= btnY + 56) { sClick(); startRun(); }
+    return;
+  }
+  if (y < LANE_TOP) return;
+  if (x < MID) hop(); else tapRight(x, y);
+});
+addEventListener('keydown', e => {
+  if ((state === 'intro' || state === 'over') && (e.key === 'Enter' || e.key === ' ')) { audio(); startRun(); return; }
+  if (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'w') { audio(); hop(); e.preventDefault(); }
+});
+
+// ---------- frame
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(.05, (now - last) / 1000); last = now; T += dt;
+  update(dt);
+  ctx.setTransform(dpr * scale, 0, 0, dpr * scale, 0, 0);
+  drawLeft(); drawRight(); drawEffects(); drawHud(); drawFoot();
+  if (state === 'intro') card('Hop & Pop', ['Two games at once!', 'Left: tap to hop the bunny over the logs.', 'Right: tap the fruit on the sign before it', 'lands. Never tap a bee!', 'Three hearts.'], "Let's go", 'draft 1  ·  sound on', 150);
+  if (state === 'over') card('No hearts left!', [why, `Score: ${score}   ·   ` + (score >= best && score > 0 ? 'a new best!' : `best ${best}`), `You lasted ${Math.floor(el)} seconds.`], 'Play again', '', 190);
+  requestAnimationFrame(frame);
+}
+
+// ---------- test and screenshot hooks
+if (Q.get('t')) { startRun(); const until = Number(Q.get('t')); const auto = Q.has('auto'); lives = 99; while (el < until) { if (auto) autoPlay(); update(1 / 60); T += 1 / 60; } lives = Math.min(lives, LIVES); }
+if (Q.has('over')) { state = 'over'; score = 23; best = 30; why = 'An apple fell down.'; el = 47; }
+// A perfect player, for tests: hops when a log is close, pops targets.
+function autoPlay() {
+  for (const l of logs) { const y = LANE_TOP + (el - l.t0) * l.v; if (!l.hopped && !l.hit && y > BUNNY_Y - 14 - l.v * HOP_TIME * .45 && y < BUNNY_Y - 14) hop(); }
+  for (const f of items) { if (!f.done && f.kind === targetAt(el) && itemPos(f)[1] > 300) { const p = itemPos(f); tapRight(p[0], p[1]); } }
+}
+window.__hp = { startRun, update, hop, tapRight, autoPlay, itemPos, logArrival, fruitLanding, targetAt, logSpeed, fruitSpeed, GAP,
+  get state() { return state; }, get lives() { return lives; }, set lives(v) { lives = v; }, get score() { return score; }, get el() { return el; },
+  get logs() { return logs; }, get items() { return items; }, setRnd: f => rnd = f };
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
