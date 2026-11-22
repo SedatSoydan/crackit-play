@@ -5,15 +5,16 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>Ice Glide</title>
 <style>
-html,body{margin:0;height:100%;background:#cfeaff;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none}
+html,body{margin:0;height:100%;background:#d6eeff;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none}
 canvas{display:block;margin:0 auto}
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
 <script>
-// Ice Glide, draft 1: Pip the penguin slides on the ice until a rock, the
+// Ice Glide, draft 2: Pip the penguin slides on the ice until a rock, the
 // snow bank, or a snow patch stops it. Stop on the fish to eat it.
+// Thirty lakes on a level map, harder lakes, and an ending.
 const W = 360, H = 640;
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 let scale = 1, dpr = 1;
@@ -31,12 +32,14 @@ const DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
 const DIR_KEYS = ['up', 'right', 'down', 'left'];
 
 // ---------- levels
-const ICE = 0, ROCK = 1, SNOW = 2;
+const ICE = 0, ROCK = 1, SNOW = 2, LEVELS = 30;
 function levelSpec(n) {
-  if (n <= 3) return { cols: 5, rows: 6, rocks: [4, 6], snow: 0, fish: 1, par: n === 1 ? [2, 2] : [3, 3] };
-  if (n <= 5) return { cols: 6, rows: 7, rocks: [6, 8], snow: 0, fish: 1, par: [3, 4] };
-  if (n <= 11) return { cols: 6, rows: 8, rocks: [7, 10], snow: n <= 7 ? 1 : 2, fish: 1, par: n <= 8 ? [4, 5] : [5, 6] };
-  return { cols: 7, rows: 9, rocks: [9, 13], snow: 2, fish: 2, par: n <= 16 ? [5, 6] : [6, 8] };
+  if (n <= 2) return { cols: 5, rows: 6, rocks: [4, 6], snow: 0, fish: 1, par: n === 1 ? [2, 2] : [3, 3] };
+  if (n <= 5) return { cols: 6, rows: 7, rocks: [6, 8], snow: 0, fish: 1, par: [4, 5] };
+  if (n <= 10) return { cols: 6, rows: 8, rocks: [7, 10], snow: n <= 7 ? 1 : 2, fish: 1, par: n <= 7 ? [5, 6] : [6, 7] };
+  if (n <= 15) return { cols: 7, rows: 9, rocks: [9, 13], snow: 2, fish: 1, par: [7, 9] };
+  if (n <= 22) return { cols: 7, rows: 9, rocks: [9, 13], snow: 2, fish: 2, par: [7, 9] };
+  return { cols: 7, rows: 9, rocks: [10, 14], snow: 3, fish: 2, par: [9, 11] };
 }
 
 // Where Pip stops when sliding from cell (x, y) in direction d.
@@ -75,7 +78,7 @@ function solve(lv, x0, y0, eaten0) {
   let q = [[x0, y0, start]], depth = 0;
   while (q.length) {
     const next = [];
-    let done = null;
+    let done = false;
     for (const [x, y, m] of q) {
       const s = sk(x, y, m);
       for (const d of DIR_KEYS) {
@@ -85,7 +88,7 @@ function solve(lv, x0, y0, eaten0) {
         const f = depth === 0 ? new Set([d]) : first.get(s);
         if (!dist.has(ns)) { dist.set(ns, depth + 1); ways.set(ns, ways.get(s)); first.set(ns, new Set(f)); next.push([nx, ny, nm]); }
         else if (dist.get(ns) === depth + 1) { ways.set(ns, ways.get(ns) + ways.get(s)); for (const v of f) first.get(ns).add(v); }
-        if (nm === all) done = done || [];
+        if (nm === all) done = true;
       }
     }
     depth++;
@@ -99,12 +102,14 @@ function solve(lv, x0, y0, eaten0) {
   return { moves: -1, firstDirs: [], paths: 0 };
 }
 
+// A lake from its number: random rocks and snow, then fish placed on cells
+// that are far (in slides) from Pip, checked by a full search.
 function makeLevel(n) {
   const spec = levelSpec(n), rnd = mulberry(n * 7919 + 17);
   const ri = (a, b) => a + Math.floor(rnd() * (b - a + 1));
   let best = null;
-  for (let tries = 0; tries < 600; tries++) {
-    const lv = { n, cols: spec.cols, rows: spec.rows, grid: [], fish: [], seed: tries };
+  for (let tries = 0; tries < 800; tries++) {
+    const lv = { n, cols: spec.cols, rows: spec.rows, grid: [], fish: [] };
     for (let y = 0; y < spec.rows; y++) lv.grid.push(new Array(spec.cols).fill(ICE));
     const free = () => { for (let k = 0; k < 200; k++) { const x = ri(0, spec.cols - 1), y = ri(0, spec.rows - 1); if (lv.grid[y][x] === ICE) return [x, y]; } return null; };
     for (let k = ri(spec.rocks[0], spec.rocks[1]); k > 0; k--) { const c = free(); if (c) lv.grid[c[1]][c[0]] = ROCK; }
@@ -112,18 +117,31 @@ function makeLevel(n) {
     const s = free(); if (!s) continue;
     lv.start = s;
     const dist = distances(lv, s[0], s[1]);
-    const stops = [...dist.keys()].map(k => [k % 100, Math.floor(k / 100)]).filter(([x, y]) => !(x === s[0] && y === s[1]));
     // Pip must be able to reach a good share of the lake, so there are real choices.
     if (dist.size < spec.cols * spec.rows * .3) continue;
-    // Fish on cells Pip can stop on.
-    const pickFish = () => stops[Math.floor(rnd() * stops.length)];
-    lv.fish = [pickFish()];
-    if (spec.fish === 2) { const f2 = pickFish(); if (f2[0] === lv.fish[0][0] && f2[1] === lv.fish[0][1]) continue; lv.fish.push(f2); }
-    const sol = solve(lv, s[0], s[1], 0);
-    if (sol.moves < spec.par[0] || sol.moves > spec.par[1]) continue;
-    // Not too many best paths, so the puzzle needs thought.
-    const score = sol.paths + (sol.firstDirs.length - 1) * 2;
-    if (!best || score < best.score) { best = { lv, score, sol }; if (sol.paths <= 2 && sol.firstDirs.length === 1) break; }
+    const stops = [...dist.entries()].filter(([k]) => k !== key(s[0], s[1])).map(([k, d]) => [k % 100, Math.floor(k / 100), d]);
+    const cands = [];
+    if (spec.fish === 1) {
+      for (const c of stops) if (c[2] >= spec.par[0] && c[2] <= spec.par[1]) cands.push([[c[0], c[1]]]);
+    } else {
+      const far = stops.filter(c => c[2] >= 2);
+      for (let k = 0; k < 12 && far.length > 1; k++) {
+        const a = far[ri(0, far.length - 1)], b = far[ri(0, far.length - 1)];
+        if (a !== b) cands.push([[a[0], a[1]], [b[0], b[1]]]);
+      }
+    }
+    if (!cands.length) continue;
+    for (let k = 0; k < 4; k++) {
+      lv.fish = cands[ri(0, cands.length - 1)];
+      const sol = solve(lv, s[0], s[1], 0);
+      if (sol.moves < 0) continue;
+      const inRange = sol.moves >= spec.par[0] && sol.moves <= spec.par[1];
+      const gap = sol.moves < spec.par[0] ? spec.par[0] - sol.moves : sol.moves - spec.par[1];
+      // Few best paths and one right first slide make the puzzle need thought.
+      const score = inRange ? sol.paths + (sol.firstDirs.length - 1) * 2 : 1000 + gap;
+      if (!best || score < best.score) best = { lv: { ...lv, fish: lv.fish.map(f => [...f]) }, score, sol };
+    }
+    if (best && best.score <= 2) break;
   }
   best.lv.par = best.sol.moves;
   return best.lv;
@@ -131,14 +149,19 @@ function makeLevel(n) {
 
 // ---------- state
 let state = 'intro', T = 0, levelNo = 1, lv = null, pip = null, moves = 0, eaten = 0, history = [], hintUsed = false, hint = null;
-let anim = null, bump = null, winAt = -1, stars = 0, swipe = null, sparkles = [], hearts = [], flips = [];
+let anim = null, bump = null, winAt = -1, stars = 0, swipe = null, sparkles = [], hearts = [], flips = [], trails = [], newBest = false;
 let progress = {};
-try { progress = JSON.parse(localStorage.getItem('iceglide') || '{}'); } catch (e) { /* storage off */ }
+try { progress = JSON.parse(localStorage.getItem('iceglide2') || '{}'); } catch (e) { /* storage off */ }
+if (Q.has('all')) for (let n = 1; n <= LEVELS; n++) progress[n] = progress[n] || 1;
+const totalStars = () => Object.values(progress).reduce((a, b) => a + b, 0);
+const unlocked = n => n === 1 || (progress[n - 1] || 0) > 0;
+const firstOpen = () => { for (let n = 1; n <= LEVELS; n++) if (!progress[n]) return n; return LEVELS; };
 
 function startLevel(n) {
-  levelNo = Math.max(1, n); lv = makeLevel(levelNo);
+  levelNo = Math.min(LEVELS, Math.max(1, n)); lv = makeLevel(levelNo);
   pip = { x: lv.start[0], y: lv.start[1], face: 'down' };
-  moves = 0; eaten = 0; history = []; hintUsed = false; hint = null; anim = null; bump = null; winAt = -1; sparkles = []; hearts = []; flips = [];
+  moves = 0; eaten = 0; history = []; hintUsed = false; hint = null; anim = null; bump = null; winAt = -1;
+  sparkles = []; hearts = []; flips = []; trails = []; newBest = false;
   state = 'play';
 }
 function allEaten() { return eaten === (1 << lv.fish.length) - 1; }
@@ -153,6 +176,7 @@ function move(d) {
   history.push({ x: pip.x, y: pip.y, eaten, moves });
   const cells = Math.abs(nx - pip.x) + Math.abs(ny - pip.y);
   anim = { from: [pip.x, pip.y], to: [nx, ny], d, t: T, dur: Math.max(.2, cells * .075), passed: [] };
+  trails.push({ from: [pip.x, pip.y], to: [nx, ny], t: T }); if (trails.length > 3) trails.shift();
   hint = null; moves++; sSlide(cells);
 }
 function finishSlide() {
@@ -166,15 +190,17 @@ function finishSlide() {
     winAt = T;
     stars = moves <= lv.par ? 3 : moves <= lv.par + 2 ? 2 : 1;
     if (hintUsed) stars = Math.min(stars, 2);
-    const p = progress[levelNo] || 0; if (stars > p) { progress[levelNo] = stars; try { localStorage.setItem('iceglide', JSON.stringify(progress)); } catch (e) { /* storage off */ } }
+    const p = progress[levelNo] || 0;
+    newBest = stars > p;
+    if (newBest) { progress[levelNo] = stars; try { localStorage.setItem('iceglide2', JSON.stringify(progress)); } catch (e) { /* storage off */ } }
   }
 }
 function undo() {
   if (state !== 'play' || busy() || !history.length) return;
   audio(); sClick();
-  const h = history.pop(); pip.x = h.x; pip.y = h.y; eaten = h.eaten; moves = h.moves; hint = null;
+  const h = history.pop(); pip.x = h.x; pip.y = h.y; eaten = h.eaten; moves = h.moves; hint = null; trails.pop();
 }
-function restart() { if (state !== 'play' || anim) return; audio(); sClick(); const n = levelNo; startLevel(n); }
+function restart() { if (state !== 'play' || anim) return; audio(); sClick(); startLevel(levelNo); }
 function showHint() {
   if (state !== 'play' || busy()) return;
   audio(); sClick();
@@ -182,6 +208,7 @@ function showHint() {
   hintUsed = true;
   hint = sol.moves < 0 ? { stuck: true, t: T } : { d: sol.firstDirs[0], t: T, left: sol.moves };
 }
+function nextFromWin() { if (levelNo >= LEVELS) state = 'done'; else startLevel(levelNo + 1); }
 function update(dt) {
   if (anim) {
     const u = (T - anim.t) / anim.dur;
@@ -196,9 +223,10 @@ function update(dt) {
 const ease = u => 1 - Math.pow(1 - u, 2.2);
 
 // ---------- layout
+const BOARD = { top: 106, w: 314, h: 428 };
 function boardRect() {
-  const cs = Math.min(320 / lv.cols, 392 / lv.rows), w = cs * lv.cols, h = cs * lv.rows;
-  return { x: (W - w) / 2, y: 110 + (392 - h) / 2, cs, w, h };
+  const cs = Math.min(BOARD.w / lv.cols, BOARD.h / lv.rows), w = cs * lv.cols, h = cs * lv.rows;
+  return { x: (W - w) / 2, y: BOARD.top + (BOARD.h - h) / 2, cs, w, h };
 }
 function cellCenter(x, y) { const b = boardRect(); return [b.x + (x + .5) * b.cs, b.y + (y + .5) * b.cs]; }
 function pipPos() {
@@ -214,14 +242,29 @@ function lin(x0, y0, x1, y1, stops) { const g = ctx.createLinearGradient(x0, y0,
 function rad(x, y, r, stops) { const g = ctx.createRadialGradient(x, y, 0, x, y, r); stops.forEach(([o, c]) => g.addColorStop(o, c)); return g; }
 function hash(n) { const x = Math.sin(n * 127.1 + 31.7) * 43758.5453; return x - Math.floor(x); }
 function text(s, x, y, size, col, weight = 800, align = 'center') { ctx.fillStyle = col; ctx.font = `${weight} ${size}px "Trebuchet MS", system-ui, sans-serif`; ctx.textAlign = align; ctx.fillText(s, x, y); }
+function pill(x, y, w, h) {
+  ctx.fillStyle = 'rgba(60,120,180,.16)'; rrect(x, y + 3, w, h, h / 2); ctx.fill();
+  ctx.fillStyle = lin(0, y, 0, y + h, [[0, '#ffffff'], [1, '#eef7ff']]); rrect(x, y, w, h, h / 2); ctx.fill();
+  ctx.strokeStyle = 'rgba(90,150,210,.28)'; ctx.lineWidth = 1; ctx.stroke();
+}
 
 // ---------- scene
 function drawBackdrop() {
-  ctx.fillStyle = lin(0, 0, 0, H, [[0, '#bfe6ff'], [.45, '#e4f5ff'], [1, '#f4fbff']]); ctx.fillRect(0, 0, W, H);
-  // Far snowy hills and pines.
-  ctx.fillStyle = '#ffffff';
-  ctx.beginPath(); ctx.moveTo(0, 110); ctx.quadraticCurveTo(90, 70, 190, 104); ctx.quadraticCurveTo(280, 80, 360, 100); ctx.lineTo(360, 140); ctx.lineTo(0, 140); ctx.fill();
-  for (const [px, py, s] of [[22, 104, 1], [46, 98, .8], [318, 100, 1], [340, 106, .75]]) pine(px, py, s);
+  ctx.fillStyle = lin(0, 0, 0, H, [[0, '#a9dcff'], [.18, '#d2edff'], [.5, '#eaf6ff'], [1, '#f6fbff']]); ctx.fillRect(0, 0, W, H);
+  // A soft winter sun.
+  ctx.fillStyle = rad(300, 26, 60, [[0, 'rgba(255,255,240,.9)'], [.25, 'rgba(255,250,225,.55)'], [1, 'rgba(255,250,225,0)']]); ctx.fillRect(220, 0, 140, 100);
+  // Far blue mountains with snowy tops.
+  for (const [mx, mh, mw, col] of [[40, 52, 70, '#b5d6f0'], [120, 64, 80, '#a9cfee'], [215, 48, 70, '#b5d6f0'], [300, 60, 80, '#a9cfee']]) {
+    const base = 104;
+    ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(mx - mw, base); ctx.lineTo(mx, base - mh); ctx.lineTo(mx + mw, base); ctx.fill();
+    ctx.fillStyle = '#f4faff'; ctx.beginPath(); ctx.moveTo(mx - mw * .3, base - mh * .7); ctx.lineTo(mx, base - mh); ctx.lineTo(mx + mw * .3, base - mh * .7);
+    ctx.lineTo(mx + mw * .15, base - mh * .62); ctx.lineTo(mx, base - mh * .72); ctx.lineTo(mx - mw * .14, base - mh * .6); ctx.fill();
+  }
+  // Snowy ground with a few pines at the sides.
+  ctx.fillStyle = lin(0, 90, 0, H, [[0, '#f7fbff'], [.12, '#e2eef9'], [1, '#d9e9f6']]); ctx.beginPath(); ctx.moveTo(0, 100); ctx.quadraticCurveTo(100, 86, 180, 98); ctx.quadraticCurveTo(270, 108, 360, 94); ctx.lineTo(360, H); ctx.lineTo(0, H); ctx.fill();
+  for (const [px, py, s] of [[10, 112, .9], [350, 110, .9]]) pine(px, py, s);
+  // Gentle snow dunes under the lake.
+  ctx.fillStyle = '#e6f2fc'; ctx.beginPath(); ctx.moveTo(0, 600); ctx.quadraticCurveTo(120, 580, 200, 598); ctx.quadraticCurveTo(290, 614, 360, 592); ctx.lineTo(360, H); ctx.lineTo(0, H); ctx.fill();
 }
 function pine(x, y, s) {
   ctx.fillStyle = '#7a5a3a'; ctx.fillRect(x - 2 * s, y - 4 * s, 4 * s, 8 * s);
@@ -234,68 +277,110 @@ function pine(x, y, s) {
 }
 
 function drawLake() {
-  const b = boardRect();
-  // Snow bank around the lake.
-  ctx.fillStyle = 'rgba(70,120,170,.18)'; rrect(b.x - 14, b.y - 10, b.w + 28, b.h + 30, 26); ctx.fill();
-  ctx.fillStyle = lin(0, b.y - 14, 0, b.y + b.h + 16, [[0, '#ffffff'], [1, '#e3f0fa']]); rrect(b.x - 14, b.y - 14, b.w + 28, b.h + 28, 26); ctx.fill();
+  const b = boardRect(), m = 13;
+  // The snow bank: a soft shadow, then a lumpy white rim.
+  ctx.fillStyle = 'rgba(70,120,170,.2)'; rrect(b.x - m, b.y - m + 8, b.w + m * 2, b.h + m * 2, 24); ctx.fill();
+  ctx.fillStyle = '#ffffff'; rrect(b.x - m, b.y - m, b.w + m * 2, b.h + m * 2, 24); ctx.fill();
+  const bumps = (x0, y0, x1, y1, r) => {
+    const len = Math.hypot(x1 - x0, y1 - y0), k = Math.max(2, Math.round(len / 22));
+    for (let i = 0; i <= k; i++) { const u = i / k; ell(x0 + (x1 - x0) * u, y0 + (y1 - y0) * u, r * (.85 + hash(i * 3 + x0) * .3), r * .8, '#ffffff'); }
+  };
+  bumps(b.x, b.y - m + 1, b.x + b.w, b.y - m + 1, 9);
+  bumps(b.x - m + 1, b.y + 10, b.x - m + 1, b.y + b.h - 10, 7);
+  bumps(b.x + b.w + m - 1, b.y + 10, b.x + b.w + m - 1, b.y + b.h - 10, 7);
+  ctx.fillStyle = lin(0, b.y + b.h, 0, b.y + b.h + m, [[0, '#ffffff'], [1, '#dcebf7']]); rrect(b.x - m, b.y + b.h - 4, b.w + m * 2, m + 4, 12); ctx.fill();
+  // A blue rim of snow shade where the ice meets the bank.
+  ctx.fillStyle = '#c4dcef'; rrect(b.x - 3, b.y - 3, b.w + 6, b.h + 6, 15); ctx.fill();
   // The ice.
-  ctx.save(); rrect(b.x, b.y, b.w, b.h, 14); ctx.clip();
-  ctx.fillStyle = lin(b.x, b.y, b.x + b.w, b.y + b.h, [[0, '#d8f1ff'], [.5, '#bfe5fb'], [1, '#a9d8f5']]); ctx.fillRect(b.x, b.y, b.w, b.h);
-  // Tile grid and shine streaks.
-  ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 1;
+  ctx.save(); rrect(b.x, b.y, b.w, b.h, 13); ctx.clip();
+  ctx.fillStyle = lin(b.x, b.y, b.x + b.w * .4, b.y + b.h, [[0, '#d6f2ff'], [.5, '#b4e1fb'], [1, '#8fcbf0']]); ctx.fillRect(b.x, b.y, b.w, b.h);
+  // Light spots in the ice.
+  for (let k = 0; k < 5; k++) {
+    const sx = b.x + hash(lv.n * 5 + k) * b.w, sy = b.y + hash(lv.n * 9 + k * 3) * b.h, r = 50 + hash(k * 11) * 60;
+    ctx.fillStyle = rad(sx, sy, r, [[0, 'rgba(255,255,255,.22)'], [1, 'rgba(255,255,255,0)']]); ctx.fillRect(sx - r, sy - r, r * 2, r * 2);
+  }
+  // Two broad sheen bands across the lake.
+  ctx.fillStyle = 'rgba(255,255,255,.16)';
+  for (const off of [.18, .58]) { const x0 = b.x + b.w * off; ctx.beginPath(); ctx.moveTo(x0, b.y); ctx.lineTo(x0 + 46, b.y); ctx.lineTo(x0 - b.h * .35 + 46, b.y + b.h); ctx.lineTo(x0 - b.h * .35, b.y + b.h); ctx.fill(); }
+  // Faint tile seams.
+  ctx.strokeStyle = 'rgba(255,255,255,.38)'; ctx.lineWidth = 1;
   for (let x = 1; x < lv.cols; x++) { ctx.beginPath(); ctx.moveTo(b.x + x * b.cs, b.y); ctx.lineTo(b.x + x * b.cs, b.y + b.h); ctx.stroke(); }
   for (let y = 1; y < lv.rows; y++) { ctx.beginPath(); ctx.moveTo(b.x, b.y + y * b.cs); ctx.lineTo(b.x + b.w, b.y + y * b.cs); ctx.stroke(); }
-  ctx.strokeStyle = 'rgba(255,255,255,.5)'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+  // A few thin cracks.
+  ctx.lineCap = 'round';
   for (let y = 0; y < lv.rows; y++) for (let x = 0; x < lv.cols; x++) {
-    if (hash(lv.n * 31 + x * 7 + y * 13) < .45) continue;
-    const [cx, cy] = cellCenter(x, y), r = b.cs * .22;
-    ctx.beginPath(); ctx.moveTo(cx - r, cy + r * .4); ctx.lineTo(cx - r * .2, cy - r * .5); ctx.stroke();
-    if (hash(x * 3 + y) > .5) { ctx.beginPath(); ctx.moveTo(cx + r * .1, cy + r * .6); ctx.lineTo(cx + r * .6, cy + r * .05); ctx.stroke(); }
+    if (hash(lv.n * 31 + x * 7 + y * 13) > .14 || lv.grid[y][x] !== ICE) continue;
+    const [cx, cy] = cellCenter(x, y), r = b.cs * .32, a = hash(x * 5 + y * 3) * TAU;
+    const pts = [[cx - Math.cos(a) * r, cy - Math.sin(a) * r], [cx + (hash(x + y * 9) - .5) * r * .5, cy + (hash(x * 9 + y) - .5) * r * .5], [cx + Math.cos(a) * r, cy + Math.sin(a) * r]];
+    for (const [col, off] of [['rgba(70,140,200,.25)', 1], ['rgba(255,255,255,.75)', 0]]) {
+      ctx.strokeStyle = col; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1] + off); ctx.lineTo(pts[1][0], pts[1][1] + off); ctx.lineTo(pts[2][0], pts[2][1] + off);
+      ctx.moveTo(pts[1][0], pts[1][1] + off); ctx.lineTo(pts[1][0] + Math.cos(a + 1.4) * r * .5, pts[1][1] + Math.sin(a + 1.4) * r * .5 + off); ctx.stroke();
+    }
+  }
+  // Skid marks of the last slides.
+  for (const tr of trails) {
+    const age = T - tr.t, alpha = Math.max(0, .55 - age * .12); if (alpha <= 0) continue;
+    let to = tr.to;
+    if (anim && tr === trails[trails.length - 1]) to = pipPos();
+    const [x0, y0] = cellCenter(tr.from[0], tr.from[1]), [x1, y1] = cellCenter(to[0], to[1]);
+    const nx = -(y1 - y0), ny = x1 - x0, l = Math.hypot(nx, ny) || 1, o = b.cs * .1;
+    ctx.strokeStyle = `rgba(255,255,255,${alpha})`; ctx.lineWidth = 2.2;
+    for (const sgn of [-1, 1]) { ctx.beginPath(); ctx.moveTo(x0 + nx / l * o * sgn, y0 + ny / l * o * sgn + b.cs * .3); ctx.lineTo(x1 + nx / l * o * sgn, y1 + ny / l * o * sgn + b.cs * .3); ctx.stroke(); }
   }
   ctx.lineCap = 'butt';
+  // Inner shade at the top edge, under the bank.
+  ctx.fillStyle = lin(0, b.y, 0, b.y + 14, [[0, 'rgba(50,100,150,.25)'], [1, 'rgba(50,100,150,0)']]); ctx.fillRect(b.x, b.y, b.w, 14);
   ctx.restore();
-  ctx.strokeStyle = 'rgba(90,150,200,.35)'; ctx.lineWidth = 2; rrect(b.x, b.y, b.w, b.h, 14); ctx.stroke();
 }
 
 function drawRock(x, y) {
-  const b = boardRect(), [cx, cy] = cellCenter(x, y), r = b.cs * .42, s = hash(x * 11 + y * 17 + lv.n);
-  ell(cx + 2, cy + r * .55, r * .95, r * .32, 'rgba(40,80,120,.25)');
-  ctx.fillStyle = rad(cx - r * .3, cy - r * .4, r * 1.5, [[0, '#b7c0cf'], [.6, '#8a94a6'], [1, '#5f6878']]);
-  ctx.beginPath();
-  for (let k = 0; k < 9; k++) { const a = k / 9 * TAU, rr = r * (.86 + hash(s * 50 + k) * .2); ctx.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr * .88 + r * .05); }
-  ctx.closePath(); ctx.fill();
-  ctx.strokeStyle = '#4e5666'; ctx.lineWidth = 1.5; ctx.stroke();
-  // Snow cap and a little shine.
-  ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.ellipse(cx - r * .05, cy - r * .55, r * .62, r * .26, -.1, 0, TAU); ctx.fill();
-  ell(cx - r * .35, cy - r * .62, r * .12, r * .06, '#e8f4ff');
-  ell(cx + r * .38, cy + r * .1, r * .1, r * .18, 'rgba(255,255,255,.35)', .4);
+  const b = boardRect(), [cx, cy] = cellCenter(x, y), r = b.cs * .43, s = hash(x * 11 + y * 17 + lv.n);
+  ell(cx + 2, cy + r * .62, r * .98, r * .3, 'rgba(30,70,110,.28)');
+  const pts = [];
+  for (let k = 0; k < 9; k++) { const a = k / 9 * TAU - Math.PI / 2, rr = r * (.84 + hash(s * 50 + k) * .2); pts.push([cx + Math.cos(a) * rr, cy + Math.sin(a) * rr * .86 + r * .06]); }
+  const path = () => { ctx.beginPath(); pts.forEach(([px, py], i) => i ? ctx.lineTo(px, py) : ctx.moveTo(px, py)); ctx.closePath(); };
+  path(); ctx.fillStyle = lin(0, cy - r, 0, cy + r, [[0, '#a9b4c6'], [.55, '#848fa3'], [1, '#5c6679']]); ctx.fill();
+  // A darker lower right facet and a light upper left facet.
+  ctx.save(); path(); ctx.clip();
+  ctx.fillStyle = 'rgba(40,50,70,.22)'; ctx.beginPath(); ctx.moveTo(cx + r * .1, cy - r); ctx.lineTo(cx + r * 1.1, cy - r * .2); ctx.lineTo(cx + r * 1.1, cy + r); ctx.lineTo(cx - r * .2, cy + r); ctx.lineTo(cx + r * .25, cy + r * .1); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,.16)'; ctx.beginPath(); ctx.moveTo(cx - r, cy - r * .2); ctx.lineTo(cx - r * .1, cy - r * .3); ctx.lineTo(cx - r * .35, cy + r * .4); ctx.lineTo(cx - r, cy + r * .3); ctx.fill();
+  ctx.restore();
+  path(); ctx.strokeStyle = '#4a5366'; ctx.lineWidth = 1.5; ctx.stroke();
+  // Snow cap with two little drips.
+  ctx.fillStyle = '#ffffff'; ctx.beginPath();
+  ctx.ellipse(cx - r * .02, cy - r * .5, r * .66, r * .3, -.08, 0, TAU); ctx.fill();
+  ell(cx - r * .38, cy - r * .3, r * .13, r * .17, '#ffffff'); ell(cx + r * .22, cy - r * .28, r * .1, r * .14, '#ffffff');
+  ell(cx - r * .2, cy - r * .62, r * .26, r * .08, '#eaf5ff');
 }
 function drawSnow(x, y) {
   const b = boardRect(), [cx, cy] = cellCenter(x, y), r = b.cs * .44;
-  ell(cx, cy + r * .2, r, r * .75, '#c9e0f2');
-  for (const [dx, dy, rr] of [[-.45, .05, .42], [0, -.2, .5], [.45, .05, .42], [-.2, .3, .45], [.25, .3, .45]]) ell(cx + dx * r, cy + dy * r, rr * r, rr * r * .9, '#ffffff');
-  for (let k = 0; k < 3; k++) ell(cx + (hash(k + x * 5 + y) - .5) * r, cy + (hash(k * 7 + y * 3 + x) - .5) * r * .6, 1.4, 1.4, '#cfe6f7');
+  ell(cx + 1, cy + r * .45, r * .95, r * .35, 'rgba(60,110,160,.2)');
+  ell(cx, cy + r * .2, r, r * .72, '#cfe3f3');
+  for (const [dx, dy, rr] of [[-.45, .08, .42], [0, -.18, .52], [.45, .08, .42], [-.2, .32, .45], [.25, .32, .45]]) ell(cx + dx * r, cy + dy * r, rr * r, rr * r * .9, '#ffffff');
+  ell(cx - r * .15, cy - r * .32, r * .22, r * .1, '#f4faff');
+  for (let k = 0; k < 4; k++) ell(cx + (hash(k + x * 5 + y) - .5) * r * 1.2, cy + (hash(k * 7 + y * 3 + x) - .3) * r * .6, 1.3, 1.3, '#bcd8ee');
 }
 function drawFish(i, f) {
   if (eaten & 1 << i) return;
-  const b = boardRect(), [cx, cy] = cellCenter(f[0], f[1]), s = b.cs / 46;
+  const b = boardRect(), [cx, cy] = cellCenter(f[0], f[1]), s = b.cs / 44;
   const flip = flips.find(q => q.i === i && T - q.t < .6), fu = flip ? (T - flip.t) / .6 : 0;
   const wig = Math.sin(T * 6 + i) * .12, hop = flip ? Math.sin(fu * Math.PI) * 12 * s : 0;
-  // A glint on the ice under the fish.
-  ell(cx, cy + 9 * s, 15 * s, 4 * s, 'rgba(40,90,140,.2)');
+  ell(cx, cy + 11 * s, 16 * s, 4 * s, 'rgba(30,80,130,.22)');
   ctx.save(); ctx.translate(cx, cy - hop); ctx.rotate(wig + (flip ? fu * TAU : 0)); ctx.scale(s, s);
-  ctx.fillStyle = '#ff7a3d'; ctx.beginPath(); ctx.moveTo(10, 0); ctx.lineTo(19, -8); ctx.lineTo(18, 8); ctx.closePath(); ctx.fill();
-  ctx.fillStyle = lin(0, -9, 0, 9, [[0, '#ffb15a'], [1, '#ff6a2a']]); ctx.beginPath(); ctx.ellipse(-2, 0, 14, 9, 0, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#ff7a3d'; ctx.beginPath(); ctx.moveTo(10, 0); ctx.quadraticCurveTo(16, -3, 20, -9); ctx.quadraticCurveTo(17, 0, 20, 9); ctx.quadraticCurveTo(16, 3, 10, 0); ctx.fill();
+  ctx.fillStyle = '#ff8f4a'; ctx.beginPath(); ctx.moveTo(-6, -8); ctx.quadraticCurveTo(0, -15, 6, -8); ctx.fill();
+  ctx.fillStyle = lin(0, -9, 0, 9, [[0, '#ffb65e'], [1, '#ff6a2a']]); ctx.beginPath(); ctx.ellipse(-2, 0, 14, 9, 0, 0, TAU); ctx.fill();
   ctx.strokeStyle = '#d9541f'; ctx.lineWidth = 1.2; ctx.stroke();
-  ctx.fillStyle = '#ffd08a'; ctx.beginPath(); ctx.ellipse(-3, 3, 8, 3.4, 0, 0, TAU); ctx.fill();
-  ctx.strokeStyle = 'rgba(200,70,20,.6)'; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.arc(3, 0, 5, -1, 1); ctx.stroke();
-  ell(-9, -2, 2.6, 2.6, '#ffffff'); ell(-9.4, -2, 1.5, 1.5, '#1f2a3a');
+  ctx.fillStyle = '#ffd99a'; ctx.beginPath(); ctx.ellipse(-3, 3.5, 8, 3.2, 0, 0, TAU); ctx.fill();
+  ctx.strokeStyle = 'rgba(200,70,20,.55)'; ctx.lineWidth = 1.3; ctx.beginPath(); ctx.arc(3, 0, 5, -1, 1); ctx.stroke();
+  ell(-1, -5, 4, 1.6, 'rgba(255,255,255,.45)', -.2);
+  ell(-9, -2, 2.8, 2.8, '#ffffff'); ell(-9.4, -1.8, 1.6, 1.6, '#1f2a3a'); ell(-9.9, -2.6, .6, .6, '#ffffff');
   ctx.restore();
-  if (flip) text('almost!', cx, cy - 22 * s - hop, 11, `rgba(60,110,160,${1 - fu})`, 800);
+  if (flip) text('almost!', cx, cy - 22 * s - hop, 12, `rgba(40,100,160,${1 - fu})`, 800);
 }
 
 function drawPip() {
-  const b = boardRect(), [px, py] = pipPos(), [cx, cy0] = cellCenter(px, py), s = b.cs / 48;
+  const b = boardRect(), [px, py] = pipPos(), [cx, cy0] = cellCenter(px, py), s = b.cs / 44;
   const sliding = !!anim, d = pip.face;
   let ox = 0, oy = 0, squash = 1;
   if (bump && T - bump.t < .3) {
@@ -303,35 +388,39 @@ function drawPip() {
     if (bump.land) squash = 1 - .18 * k; else { ox = DIRS[bump.d][0] * 5 * k; oy = DIRS[bump.d][1] * 5 * k; }
   }
   const cy = cy0 + oy, x = cx + ox;
-  // Skid sparkles while sliding.
-  if (sliding && Math.random() < .6) sparkles.push({ x: x - DIRS[d][0] * 12 * s + (Math.random() - .5) * 10, y: cy + 10 * s + (Math.random() - .5) * 6, t: T });
-  ell(x, cy + 15 * s, 15 * s, 4.5 * s, 'rgba(40,80,130,.25)');
-  ctx.save(); ctx.translate(x, cy + 16 * s); ctx.scale(s * (2 - squash), s * squash);
-  // A slide tilts Pip forward onto its belly.
+  if (sliding && Math.random() < .6) sparkles.push({ x: x - DIRS[d][0] * 12 * s + (Math.random() - .5) * 10, y: cy + 12 * s + (Math.random() - .5) * 6, t: T });
+  ell(x, cy + 16 * s, 16 * s, 4.5 * s, 'rgba(30,70,120,.28)');
+  ctx.save(); ctx.translate(x, cy + 17 * s); ctx.scale(s * (2 - squash), s * squash);
   const tilt = sliding ? (d === 'left' ? -.35 : d === 'right' ? .35 : 0) : 0;
   ctx.rotate(tilt);
-  ctx.translate(0, -16);
+  ctx.translate(0, -17);
   const side = d === 'left' ? -1 : d === 'right' ? 1 : 0, back = d === 'up';
+  const blink = !sliding && (T % 3.7) < .12;
   // Feet.
-  ell(-6, 15, 5, 2.6, '#ff9a2a'); ell(6, 15, 5, 2.6, '#ff9a2a');
-  // Body, flippers, belly.
-  ctx.fillStyle = lin(0, -18, 0, 16, [[0, '#3a4a6a'], [1, '#1f2a40']]); ctx.beginPath(); ctx.ellipse(0, 0, 14, 17, 0, 0, TAU); ctx.fill();
-  ell(-13 + side * 2, 2, 4, 9, '#26324a', sliding ? -1.1 : .35); ell(13 + side * 2, 2, 4, 9, '#26324a', sliding ? 1.1 : -.35);
+  ell(-6, 16, 5.5, 2.8, '#ff9a2a'); ell(6, 16, 5.5, 2.8, '#ff9a2a');
+  // Body with a soft rim light, flippers, belly.
+  ctx.fillStyle = lin(-10, -18, 10, 16, [[0, '#46597e'], [1, '#1d273c']]); ctx.beginPath(); ctx.ellipse(0, 0, 15, 18, 0, 0, TAU); ctx.fill();
+  ctx.strokeStyle = 'rgba(160,200,240,.35)'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.ellipse(0, 0, 14.4, 17.4, 0, -2.6, -1.2); ctx.stroke();
+  ell(-14 + side * 2, 2, 4.2, 9.5, '#25314a', sliding ? -1.1 : .35); ell(14 + side * 2, 2, 4.2, 9.5, '#25314a', sliding ? 1.1 : -.35);
   if (!back) {
-    ell(side * 3, 3, 9.5, 12.5, '#ffffff');
-    ell(side * 3, 3, 9.5, 12.5, 'rgba(255,255,255,0)');
-    // Face.
+    ctx.fillStyle = lin(0, -8, 0, 16, [[0, '#ffffff'], [1, '#e4eef8']]); ctx.beginPath(); ctx.ellipse(side * 3, 3.5, 10, 13, 0, 0, TAU); ctx.fill();
     const ex = side * 4;
-    ell(ex - 4.5, -7, 2.6, 3, '#ffffff'); ell(ex + 4.5, -7, 2.6, 3, '#ffffff');
-    ell(ex - 4.2 + side, -6.6, 1.6, 1.9, '#141c2c'); ell(ex + 4.8 + side, -6.6, 1.6, 1.9, '#141c2c');
-    ell(ex - 4.8, -7.6, .6, .6, '#ffffff'); ell(ex + 4.2, -7.6, .6, .6, '#ffffff');
-    ctx.fillStyle = '#ff9a2a'; ctx.beginPath(); ctx.moveTo(ex - 3.5, -2.5); ctx.lineTo(ex + 3.5, -2.5); ctx.lineTo(ex + side * 5, 2); ctx.closePath(); ctx.fill();
-    ell(ex - 8, -1, 2.2, 1.4, 'rgba(255,130,150,.5)'); ell(ex + 8, -1, 2.2, 1.4, 'rgba(255,130,150,.5)');
+    if (blink) {
+      ctx.strokeStyle = '#141c2c'; ctx.lineWidth = 1.4;
+      for (const ox2 of [-4.5, 4.5]) { ctx.beginPath(); ctx.arc(ex + ox2, -7, 2.2, .3, Math.PI - .3); ctx.stroke(); }
+    } else {
+      ell(ex - 4.5, -7, 2.8, 3.2, '#ffffff'); ell(ex + 4.5, -7, 2.8, 3.2, '#ffffff');
+      ell(ex - 4.2 + side, -6.6, 1.8, 2.1, '#141c2c'); ell(ex + 4.8 + side, -6.6, 1.8, 2.1, '#141c2c');
+      ell(ex - 4.8 + side, -7.7, .7, .7, '#ffffff'); ell(ex + 4.2 + side, -7.7, .7, .7, '#ffffff');
+    }
+    ctx.fillStyle = '#ff9a2a'; ctx.beginPath(); ctx.moveTo(ex - 3.6, -2.6); ctx.quadraticCurveTo(ex, -3.6, ex + 3.6, -2.6); ctx.lineTo(ex + side * 5, 2); ctx.closePath(); ctx.fill();
+    ell(ex - 8.5, -1, 2.4, 1.5, 'rgba(255,130,150,.55)'); ell(ex + 8.5, -1, 2.4, 1.5, 'rgba(255,130,150,.55)');
   }
   // A little red scarf at the neck, its end hanging down one side.
-  ctx.fillStyle = '#ff5a6a'; rrect(-12, 3, 24, 4.6, 2.3); ctx.fill();
-  ctx.fillStyle = '#e8434f'; rrect(side >= 0 ? 5 : -10, 5, 5, 9, 2); ctx.fill();
-  ell(-5, 4, 4, 1.4, 'rgba(255,255,255,.25)');
+  ctx.fillStyle = '#ff5a6a'; rrect(-12.5, 3, 25, 5, 2.5); ctx.fill();
+  ctx.fillStyle = '#e8434f'; rrect(side >= 0 ? 5 : -10, 5, 5, 10, 2); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.fillRect(side >= 0 ? 5.5 : -9.5, 11, 4, 1.2);
+  ell(-5, 4.2, 4, 1.4, 'rgba(255,255,255,.3)');
   ctx.restore();
 }
 
@@ -342,18 +431,18 @@ function drawArrows() {
     const [nx, ny] = slide(lv, pip.x, pip.y, d);
     if (nx === pip.x && ny === pip.y) continue;
     const [dx, dy] = DIRS[d], pulse = .5 + .5 * Math.sin(T * 4), isHint = hint && hint.d === d;
-    const ax = cx + dx * b.cs * .62, ay = cy + dy * b.cs * .62, r = b.cs * .16 * (isHint ? 1.35 + pulse * .25 : 1);
+    const ax = cx + dx * b.cs * .64, ay = cy + dy * b.cs * .64, r = b.cs * .15 * (isHint ? 1.35 + pulse * .25 : 1);
     ctx.save(); ctx.translate(ax, ay); ctx.rotate(Math.atan2(dy, dx));
-    ctx.fillStyle = isHint ? '#ffcf3a' : 'rgba(255,255,255,.85)';
-    ctx.strokeStyle = isHint ? '#e08a00' : 'rgba(60,120,180,.5)'; ctx.lineWidth = 1.5;
+    ctx.fillStyle = isHint ? '#ffcf3a' : 'rgba(255,255,255,.92)';
+    ctx.strokeStyle = isHint ? '#e08a00' : 'rgba(50,110,170,.55)'; ctx.lineWidth = 1.5; ctx.lineJoin = 'round';
     ctx.beginPath(); ctx.moveTo(r, 0); ctx.lineTo(-r * .7, -r * .85); ctx.lineTo(-r * .35, 0); ctx.lineTo(-r * .7, r * .85); ctx.closePath(); ctx.fill(); ctx.stroke();
     ctx.restore();
     // The hint also shows where Pip will stop.
-    if (isHint) { const [sx, sy] = cellCenter(nx, ny); ctx.strokeStyle = `rgba(255,190,40,${.5 + pulse * .4})`; ctx.lineWidth = 3; ctx.setLineDash([6, 5]); rrect(sx - b.cs * .42, sy - b.cs * .42, b.cs * .84, b.cs * .84, 10); ctx.stroke(); ctx.setLineDash([]); }
+    if (isHint) { const [sx, sy] = cellCenter(nx, ny); ctx.strokeStyle = `rgba(255,180,30,${.55 + pulse * .4})`; ctx.lineWidth = 3; ctx.setLineDash([6, 5]); rrect(sx - b.cs * .42, sy - b.cs * .42, b.cs * .84, b.cs * .84, 10); ctx.stroke(); ctx.setLineDash([]); }
   }
 }
 
-function drawEffects(dt) {
+function drawEffects() {
   const b = boardRect();
   for (const p of sparkles) { const u = (T - p.t) / .45; if (u < 1) ell(p.x, p.y - u * 4, 2.2 * (1 - u), 2.2 * (1 - u), `rgba(255,255,255,${1 - u})`); }
   sparkles = sparkles.filter(p => T - p.t < .45);
@@ -369,44 +458,51 @@ function heart(x, y, r, col) {
   ctx.bezierCurveTo(x - r * 1.6, y - r * .2, x - r * .7, y - r * 1.3, x, y - r * .45);
   ctx.bezierCurveTo(x + r * .7, y - r * 1.3, x + r * 1.6, y - r * .2, x, y + r * .9); ctx.fill();
 }
-function star(x, y, r, on) {
+function star(x, y, r, on, dim = 'rgba(120,160,200,.3)') {
   ctx.beginPath();
-  for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * .45 : r; ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); }
-  ctx.closePath(); ctx.fillStyle = on ? lin(0, y - r, 0, y + r, [[0, '#ffe27a'], [1, '#ffb300']]) : 'rgba(120,160,200,.3)'; ctx.fill();
-  if (on) { ctx.strokeStyle = '#e09a00'; ctx.lineWidth = 1.2; ctx.stroke(); }
+  for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * .47 : r; ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); }
+  ctx.closePath(); ctx.fillStyle = on ? lin(0, y - r, 0, y + r, [[0, '#ffe27a'], [1, '#ffb300']]) : dim; ctx.fill();
+  if (on) { ctx.strokeStyle = '#e09a00'; ctx.lineWidth = Math.max(.8, r * .1); ctx.lineJoin = 'round'; ctx.stroke(); }
 }
+function miniFish(x, y, s = 1) { ell(x, y, 9 * s, 6 * s, '#ff8a3d'); ctx.fillStyle = '#ff7a3d'; ctx.beginPath(); ctx.moveTo(x + 7 * s, y); ctx.lineTo(x + 14 * s, y - 5 * s); ctx.lineTo(x + 14 * s, y + 5 * s); ctx.closePath(); ctx.fill(); ell(x - 4 * s, y - 1 * s, 1.4 * s, 1.4 * s, '#1f2a3a'); }
+function menuIcon(x, y, col) { ctx.fillStyle = col; for (let k = -1; k <= 1; k++) { rrect(x - 7, y + k * 5 - 1.2, 14, 2.4, 1.2); ctx.fill(); } }
 
 function drawHud() {
-  text('I C E   G L I D E', 180, 24, 13, '#3a86c8', 800);
-  // Level and moves pills.
-  ctx.fillStyle = 'rgba(255,255,255,.85)'; rrect(14, 36, 92, 32, 16); ctx.fill();
-  text(`Level ${levelNo}`, 60, 57, 14, '#2a5a8a', 800);
-  // Arrows to try other levels.
-  text('‹', 24, 59, 20, levelNo > 1 ? '#3a86c8' : 'rgba(58,134,200,.3)', 800); text('›', 96, 59, 20, '#3a86c8', 800);
-  ctx.fillStyle = 'rgba(255,255,255,.85)'; rrect(118, 34, 124, 36, 18); ctx.fill();
-  text(`${moves}`, 152, 60, 22, '#1f4a7a', 900);
-  text(`moves · best ${lv.par}`, 198, 57, 11, '#5a86b0', 700);
-  // Stars this level would get now.
-  const now = moves <= lv.par ? 3 : moves <= lv.par + 2 ? 2 : 1, cap = hintUsed ? Math.min(2, now) : now;
-  for (let i = 0; i < 3; i++) star(272 + i * 26, 52, 10, i < cap);
+  // Level pill: opens the lake map.
+  pill(12, 30, 108, 40);
+  menuIcon(32, 50, '#3a86c8');
+  text(`Lake ${levelNo}`, 78, 56, 15, '#2a5a8a', 800);
+  // Moves against the best.
+  pill(128, 30, 116, 40);
+  text(`${moves}`, 156, 58, 22, '#1f4a7a', 900);
+  text('moves', 196, 47, 10, '#5a86b0', 700);
+  text(`best ${lv.par}`, 196, 62, 12, '#2a6aa8', 800);
+  // Stars collected on all lakes.
+  pill(252, 30, 96, 40);
+  star(274, 50, 11, true);
+  text(`${totalStars()}`, 292, 56, 16, '#2a5a8a', 900, 'left');
+  const tw = ctx.measureText(`${totalStars()}`).width;
+  text(` / ${LEVELS * 3}`, 292 + tw, 56, 11, '#7aa0c4', 700, 'left');
+  // Fish left, shown on the snow bank in a two fish lake.
   if (lv.fish.length > 1) {
-    for (let i = 0; i < lv.fish.length; i++) { const on = eaten & 1 << i; ctx.globalAlpha = on ? .35 : 1; miniFish(160 + i * 40, 92); ctx.globalAlpha = 1; }
+    const b = boardRect();
+    for (let i = 0; i < lv.fish.length; i++) { const on = eaten & 1 << i; ctx.globalAlpha = on ? .3 : 1; miniFish(W / 2 - 18 + i * 36, b.y - 6, .9); ctx.globalAlpha = 1; }
   }
 }
-function miniFish(x, y) { ell(x, y, 9, 6, '#ff8a3d'); ctx.fillStyle = '#ff7a3d'; ctx.beginPath(); ctx.moveTo(x + 7, y); ctx.lineTo(x + 14, y - 5); ctx.lineTo(x + 14, y + 5); ctx.closePath(); ctx.fill(); ell(x - 4, y - 1, 1.4, 1.4, '#1f2a3a'); }
 
-const BTNS = [{ id: 'undo', x: 30, label: 'Undo' }, { id: 'hint', x: 130, label: 'Hint' }, { id: 'restart', x: 230, label: 'Restart' }];
+const BTNS = [{ id: 'undo', x: 22, label: 'Undo' }, { id: 'hint', x: 130, label: 'Hint' }, { id: 'restart', x: 238, label: 'Restart' }];
+const BTN_Y = 560, BTN_W = 100, BTN_H = 48;
 function drawButtons() {
   for (const bt of BTNS) {
-    const y = 548, w = 100, h = 52, x = bt.x, off = bt.id === 'undo' && !history.length;
+    const y = BTN_Y, w = BTN_W, h = BTN_H, x = bt.x, off = bt.id === 'undo' && !history.length;
     ctx.globalAlpha = off ? .45 : 1;
-    ctx.fillStyle = '#7fb6e0'; rrect(x, y + 5, w, h, 20); ctx.fill();
-    ctx.fillStyle = lin(0, y, 0, y + h, [[0, '#ffffff'], [1, '#e2f1fc']]); rrect(x, y, w, h, 20); ctx.fill();
-    ctx.strokeStyle = 'rgba(80,140,200,.4)'; ctx.lineWidth = 1.2; ctx.stroke();
-    const ix = x + 26, iy = y + h / 2;
+    ctx.fillStyle = '#8dc0e6'; rrect(x, y + 4, w, h, 20); ctx.fill();
+    ctx.fillStyle = lin(0, y, 0, y + h, [[0, '#ffffff'], [1, '#e6f3fd']]); rrect(x, y, w, h, 20); ctx.fill();
+    ctx.strokeStyle = 'rgba(80,140,200,.35)'; ctx.lineWidth = 1; ctx.stroke();
+    const ix = x + 24, iy = y + h / 2;
     ctx.strokeStyle = '#3a86c8'; ctx.fillStyle = '#3a86c8'; ctx.lineWidth = 3; ctx.lineCap = 'round';
     if (bt.id === 'undo') { ctx.beginPath(); ctx.arc(ix + 2, iy + 2, 8, Math.PI * 1.1, Math.PI * 2.4); ctx.stroke(); ctx.beginPath(); ctx.moveTo(ix - 9, iy - 4); ctx.lineTo(ix - 5, iy + 3); ctx.lineTo(ix + 1, iy - 3); ctx.fill(); }
-    else if (bt.id === 'hint') { ell(ix, iy - 3, 7, 7, '#ffcf3a'); ctx.fillStyle = '#e0a000'; ctx.fillRect(ix - 3.5, iy + 4, 7, 5); }
+    else if (bt.id === 'hint') { ell(ix, iy - 3, 7, 7, '#ffcf3a'); ctx.fillStyle = '#e0a000'; rrect(ix - 3.5, iy + 4, 7, 5, 1.5); ctx.fill(); }
     else { ctx.beginPath(); ctx.arc(ix, iy, 8, -.3, Math.PI * 1.6); ctx.stroke(); ctx.beginPath(); ctx.moveTo(ix + 9, iy - 9); ctx.lineTo(ix + 9, iy - 1); ctx.lineTo(ix + 2, iy - 4); ctx.fill(); }
     ctx.lineCap = 'butt';
     text(bt.label, x + 62, y + h / 2 + 5, 14, '#2a5a8a', 800);
@@ -417,14 +513,19 @@ function drawButtons() {
   if (hint && hint.stuck) { msg = 'The fish cannot be reached from here. Undo!'; col = '#e0603a'; }
   else if (hint) { msg = `Slide ${hint.d}: ${hint.left} move${hint.left > 1 ? 's' : ''} to go.`; col = '#c08000'; }
   else if (flips.length && T - flips[flips.length - 1].t < 1.6) { msg = 'Pip slid past the fish. Stop on it!'; col = '#3a86c8'; }
-  text(msg, 180, 626, 12, col, 700);
+  else if (moves > lv.par + 2) msg = 'Over the best now. Restart for three stars?';
+  else if (moves > lv.par) msg = 'Over the best: two stars still possible.';
+  text(msg, 180, 630, 12, col, 700);
 }
 
-let btnY = 0;
-function button(x, y, w, h, label, main = true) {
-  ctx.fillStyle = main ? '#3f9e62' : '#7fb6e0'; rrect(x, y + 5, w, h, 24); ctx.fill();
-  ctx.fillStyle = main ? lin(0, y, 0, y + h, [[0, '#74d394'], [1, '#4fb874']]) : lin(0, y, 0, y + h, [[0, '#ffffff'], [1, '#e2f1fc']]); rrect(x, y, w, h, 24); ctx.fill();
-  text(label, x + w / 2, y + h / 2 + 7, 19, main ? '#ffffff' : '#2a5a8a', 800);
+// ---------- cards and the lake map
+let hits = [];
+function button(x, y, w, h, label, main, id) {
+  ctx.fillStyle = main ? '#3f9e62' : '#8dc0e6'; rrect(x, y + 5, w, h, h / 2); ctx.fill();
+  ctx.fillStyle = main ? lin(0, y, 0, y + h, [[0, '#74d394'], [1, '#4fb874']]) : lin(0, y, 0, y + h, [[0, '#ffffff'], [1, '#e6f3fd']]); rrect(x, y, w, h, h / 2); ctx.fill();
+  if (!main) { ctx.strokeStyle = 'rgba(80,140,200,.35)'; ctx.lineWidth = 1; ctx.stroke(); }
+  text(label, x + w / 2, y + h / 2 + (main ? 7 : 5), main ? 19 : 14, main ? '#ffffff' : '#2a5a8a', 800);
+  hits.push({ x, y, w, h: h + 5, id });
 }
 function card(title, lines, y0, h) {
   ctx.fillStyle = 'rgba(30,70,110,.45)'; ctx.fillRect(0, 0, W, H);
@@ -432,20 +533,45 @@ function card(title, lines, y0, h) {
   ctx.fillStyle = lin(0, y0, 0, y0 + h, [[0, '#ffffff'], [1, '#eaf6ff']]); rrect(26, y0, 308, h, 26); ctx.fill();
   ctx.strokeStyle = 'rgba(80,150,210,.5)'; ctx.lineWidth = 1.5; ctx.stroke();
   text(title, 180, y0 + 46, 28, '#2a6aa8', 900);
-  lines.forEach((l, i) => text(l, 180, y0 + 80 + i * 22, 14, '#3a5a7a', 500));
+  lines.forEach((l, i) => text(l, 180, y0 + 78 + i * 22, 14, '#3a5a7a', 500));
 }
 function drawCards() {
   if (state === 'intro') {
-    card('Ice Glide', ['Pip slides on the ice until a rock,', 'the snow bank, or a snow patch stops it.', 'Stop right on the fish to eat it!', 'Fewer moves, more stars.'], 150, 250);
-    button(80, 314, 200, 56, "Let's go"); btnY = 314;
-    text('draft 1  ·  sound on', 180, 392, 11, '#8aa6c0', 500);
+    card('Ice Glide', ['Pip slides on the ice until a rock,', 'the snow bank, or a snow patch stops it.', 'Stop right on the fish to eat it!', 'Reach it in the best number of moves', 'for three stars. 30 lakes to cross.'], 140, 290);
+    button(80, 342, 200, 56, "Let's go", true, 'go');
+    text('draft 2  ·  sound on', 180, 420, 11, '#8aa6c0', 500);
   } else if (state === 'won') {
+    const last = levelNo >= LEVELS;
     const msg = stars === 3 ? 'Best path!' : `Done in ${moves}. Best is ${lv.par}.`;
-    card(`Level ${levelNo}`, [msg, hintUsed ? 'A hint helped: up to two stars.' : ''], 160, 270);
-    for (let i = 0; i < 3; i++) star(124 + i * 56, 290, 22, i < stars);
-    button(80, 330, 200, 56, 'Next level'); btnY = 330;
-    ctx.fillStyle = 'rgba(80,150,210,.14)'; rrect(120, 398, 120, 28, 14); ctx.fill(); text('Play again', 180, 417, 13, '#2a5a8a', 800);
+    const tip = hintUsed ? 'A hint helped: up to two stars.' : stars < 3 ? `Try it in ${lv.par} for three stars.` : '';
+    card(`Lake ${levelNo}`, [msg, tip], 150, 300);
+    for (let i = 0; i < 3; i++) star(124 + i * 56, 286, 22, i < stars);
+    button(80, 322, 200, 54, last ? 'Finish' : 'Next lake', true, 'next');
+    button(60, 392, 112, 38, 'Play again', false, 'again');
+    button(188, 392, 112, 38, 'All lakes', false, 'map');
+  } else if (state === 'done') {
+    const t = totalStars();
+    card('All lakes crossed!', ['Pip is full and happy.', `You have ${t} of ${LEVELS * 3} stars.`, t < LEVELS * 3 ? 'Replay a lake in the best moves' : 'Every lake in the best moves. Wow!', t < LEVELS * 3 ? 'to fill in the missing stars.' : ''], 170, 250);
+    button(80, 336, 200, 54, 'All lakes', true, 'map');
+  } else if (state === 'map') drawMap();
+}
+function drawMap() {
+  ctx.fillStyle = 'rgba(235,246,255,.94)'; ctx.fillRect(0, 0, W, H);
+  text('Choose a lake', 180, 52, 24, '#2a6aa8', 900);
+  star(150, 80, 9, true); text(`${totalStars()} / ${LEVELS * 3}`, 188, 85, 14, '#2a5a8a', 800);
+  for (let n = 1; n <= LEVELS; n++) {
+    const i = n - 1, cx = 56 + (i % 5) * 62, cy = 132 + Math.floor(i / 5) * 72, open = unlocked(n), got = progress[n] || 0;
+    const next = open && !got;
+    ctx.fillStyle = 'rgba(60,110,160,.18)'; ctx.beginPath(); ctx.ellipse(cx, cy + 4, 25, 23, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = open ? lin(0, cy - 24, 0, cy + 24, [[0, '#dff4ff'], [1, '#9fd2f2']]) : '#dde7f0';
+    ctx.beginPath(); ctx.ellipse(cx, cy, 25, 23, 0, 0, TAU); ctx.fill();
+    ctx.strokeStyle = next ? '#ffb300' : open ? '#ffffff' : '#c8d6e4'; ctx.lineWidth = next ? 3 : 3; ctx.stroke();
+    if (open) { ell(cx - 8, cy - 9, 8, 3, 'rgba(255,255,255,.6)', -.4); text(`${n}`, cx, cy + 7, 18, '#1f4a7a', 900); }
+    else { ctx.fillStyle = '#9fb3c8'; rrect(cx - 7, cy - 3, 14, 11, 3); ctx.fill(); ctx.strokeStyle = '#9fb3c8'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(cx, cy - 3, 4.5, Math.PI, 0); ctx.stroke(); }
+    for (let k = 0; k < 3; k++) star(cx - 13 + k * 13, cy + 31, 5.5, k < got, open ? 'rgba(120,160,200,.35)' : 'rgba(120,160,200,.15)');
+    if (open) hits.push({ x: cx - 28, y: cy - 28, w: 56, h: 66, id: 'lake' + n });
   }
+  button(110, 572, 140, 42, 'Back', false, 'back');
 }
 
 // ---------- sound
@@ -472,18 +598,23 @@ function sClick() { if (AC) tone(880, AC.currentTime, .04, .05, 'triangle'); }
 
 // ---------- input
 function pagePos(e) { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) / scale, (e.clientY - r.top) / scale]; }
+let mapFrom = 'play';
+function press(id) {
+  sClick();
+  if (id === 'go') startLevel(firstOpen());
+  else if (id === 'next') nextFromWin();
+  else if (id === 'again') startLevel(levelNo);
+  else if (id === 'map') { mapFrom = state === 'play' ? 'play' : 'none'; state = 'map'; }
+  else if (id === 'back') { if (mapFrom === 'play') state = 'play'; else startLevel(firstOpen()); }
+  else if (id.startsWith('lake')) startLevel(Number(id.slice(4)));
+}
 cv.addEventListener('pointerdown', e => {
   e.preventDefault();
   const [x, y] = pagePos(e);
   audio();
-  if (state === 'intro') { if (y >= btnY && y <= btnY + 56) { sClick(); startLevel(levelNo); } return; }
-  if (state === 'won') {
-    if (y >= btnY && y <= btnY + 56) { sClick(); startLevel(levelNo + 1); }
-    else if (y >= 398 && y <= 430) { sClick(); startLevel(levelNo); }
-    return;
-  }
-  if (y >= 34 && y <= 72 && x < 110) { sClick(); if (x < 40) startLevel(levelNo - 1); else if (x > 80) startLevel(levelNo + 1); return; }
-  if (y >= 548 && y <= 606) { for (const bt of BTNS) if (x >= bt.x && x <= bt.x + 100) ({ undo, hint: showHint, restart })[bt.id](); return; }
+  if (state !== 'play') { for (const h of hits) if (x >= h.x && x <= h.x + h.w && y >= h.y && y <= h.y + h.h) { press(h.id); return; } return; }
+  if (y >= 28 && y <= 74 && x < 122) { press('map'); return; }
+  if (y >= BTN_Y && y <= BTN_Y + BTN_H + 6) { for (const bt of BTNS) if (x >= bt.x && x <= bt.x + BTN_W) ({ undo, hint: showHint, restart })[bt.id](); return; }
   swipe = { x, y, t: T };
 });
 cv.addEventListener('pointerup', e => {
@@ -498,8 +629,8 @@ cv.addEventListener('pointerup', e => {
 });
 addEventListener('keydown', e => {
   const k = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' }[e.key];
-  if (state === 'intro' && (e.key === 'Enter' || e.key === ' ')) { audio(); startLevel(levelNo); return; }
-  if (state === 'won' && (e.key === 'Enter' || e.key === ' ')) { audio(); startLevel(levelNo + 1); return; }
+  if (state === 'intro' && (e.key === 'Enter' || e.key === ' ')) { audio(); press('go'); return; }
+  if (state === 'won' && (e.key === 'Enter' || e.key === ' ')) { audio(); press('next'); return; }
   if (k) { e.preventDefault(); move(k); }
   if (e.key === 'z' || e.key === 'Backspace') undo();
   if (e.key === 'h') showHint();
@@ -511,9 +642,10 @@ let last = performance.now();
 function frame(now) {
   const dt = Math.min(.05, (now - last) / 1000); last = now; T += dt;
   update(dt);
+  hits = [];
   ctx.setTransform(dpr * scale, 0, 0, dpr * scale, 0, 0);
   drawBackdrop();
-  if (lv) {
+  if (lv && state !== 'map') {
     drawLake();
     for (let y = 0; y < lv.rows; y++) for (let x = 0; x < lv.cols; x++) { if (lv.grid[y][x] === SNOW) drawSnow(x, y); }
     lv.fish.forEach((f, i) => drawFish(i, f));
@@ -521,7 +653,7 @@ function frame(now) {
     for (let y = 0; y < lv.rows; y++) for (let x = 0; x < lv.cols; x++) if (lv.grid[y][x] === ROCK && y <= pipPos()[1]) drawRock(x, y);
     drawArrows(); drawPip();
     for (let y = 0; y < lv.rows; y++) for (let x = 0; x < lv.cols; x++) if (lv.grid[y][x] === ROCK && y > pipPos()[1]) drawRock(x, y);
-    drawEffects(dt);
+    drawEffects();
     drawHud(); drawButtons();
   }
   drawCards();
@@ -534,9 +666,12 @@ startLevel(levelNo); state = 'intro';
 if (Q.has('play')) state = 'play';
 if (Q.has('hint')) { state = 'play'; showHint(); }
 if (Q.has('won')) { state = 'won'; stars = 2; moves = lv.par + 1; }
-window.__ig = { makeLevel, solve, slide, distances, levelSpec, startLevel, move, undo, restart, showHint, update, ICE, ROCK, SNOW,
+if (Q.has('map')) { state = 'map'; mapFrom = 'none'; }
+if (Q.has('done')) state = 'done';
+window.__ig = { makeLevel, solve, slide, distances, levelSpec, startLevel, move, undo, restart, showHint, update, press, nextFromWin, ICE, ROCK, SNOW, LEVELS,
   get lv() { return lv; }, get pip() { return pip; }, get moves() { return moves; }, get eaten() { return eaten; }, get state() { return state; },
-  get stars() { return stars; }, get hint() { return hint; }, get hintUsed() { return hintUsed; }, busy, tick: dt => { T += dt; update(dt); } };
+  get stars() { return stars; }, get hint() { return hint; }, get hintUsed() { return hintUsed; }, get progress() { return progress; }, unlocked, totalStars,
+  busy, tick: dt => { T += dt; update(dt); } };
 requestAnimationFrame(frame);
 </script>
 </body>
