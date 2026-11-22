@@ -1,0 +1,611 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Echo Bot</title>
+<style>
+html,body{margin:0;height:100%;background:#efe8ff;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none}
+canvas{display:block;margin:0 auto}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Echo Bot, draft 1: walk a path, press Rewind, and that walk becomes an echo
+// that repeats it step for step while Bo starts again. Echoes hold pads down
+// so their doors open for Bo. Turn based: every step is one turn for everyone.
+const W = 360, H = 640;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let scale = 1, dpr = 1;
+function resize() {
+  dpr = window.devicePixelRatio || 1;
+  scale = Math.min(innerWidth / W, innerHeight / H);
+  cv.style.width = W * scale + 'px'; cv.style.height = H * scale + 'px';
+  cv.width = Math.round(W * scale * dpr); cv.height = Math.round(H * scale * dpr);
+}
+addEventListener('resize', resize); resize();
+const Q = new URLSearchParams(location.search);
+const TAU = Math.PI * 2;
+const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0], [0, 0]]; // up right down left wait
+const DIR_NAMES = ['up', 'right', 'down', 'left', 'wait'];
+const WAIT = 4;
+
+// ---------- levels
+// # wall, . floor, S start, E portal, a/b/c pads, A/B/C doors.
+const LEVELS = [
+  { echoes: 0, title: 'Find the portal', tip: 'Swipe or tap next to Bo to walk to the star portal.', rows: [
+    'S..#..',
+    '.#.#.#',
+    '.#...#',
+    '.####.',
+    '....#E',
+    '###...',
+  ], plan: 'ddddrrrdrru' },
+  { echoes: 1, title: 'Hold the door', tip: 'Walk onto the pad, then press Rewind. Your echo will hold it down.', rows: [
+    '#S..a#',
+    '#....#',
+    '###A##',
+    '#....#',
+    '#..E.#',
+  ], plan: 'rrr*rrdddd' },
+  { echoes: 1, title: 'A quick echo', tip: 'The echo steps when you step. Walk while it walks.', rows: [
+    'a..#..',
+    '.#.#..',
+    'S..A.E',
+  ], plan: 'uu*rrrrr' },
+  { echoes: 1, title: 'Wait in the door', tip: 'Standing in a doorway keeps it open. Wait there for your echo.', rows: [
+    'aS...b',
+    '####A#',
+    '####B.',
+    '#####E',
+  ], plan: 'lwwwrrrrr*rrrdwwwwwdrd' },
+  { echoes: 2, title: 'Two pads, one door', tip: 'A door with two pads needs both pressed at once.', rows: [
+    'a..S.a',
+    '###.##',
+    '###A##',
+    '#....E',
+  ], plan: 'lll*rr*wdddrr' },
+  { echoes: 2, title: 'Echo for an echo', tip: 'An echo can open a door for the next echo.', rows: [
+    'S.A.b.',
+    'a#####',
+    '..B..E',
+  ], plan: 'd*rrrr*ddrrrrr' },
+];
+
+function parse(i) {
+  const L = LEVELS[i], rows = L.rows, h = rows.length, w = rows[0].length;
+  const lv = { i, cols: w, rows: h, cell: [], start: 0, exit: 0, pads: {}, doors: {}, echoes: L.echoes, title: L.title, tip: L.tip, plan: L.plan, special: new Set() };
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const ch = rows[y][x], c = y * w + x;
+    lv.cell.push(ch);
+    if (ch === 'S') lv.start = c;
+    if (ch === 'E') lv.exit = c;
+    if (ch >= 'a' && ch <= 'c') { (lv.pads[ch] = lv.pads[ch] || []).push(c); lv.special.add(c); }
+    if (ch >= 'A' && ch <= 'C') { (lv.doors[ch.toLowerCase()] = lv.doors[ch.toLowerCase()] || []).push(c); lv.special.add(c); }
+  }
+  return lv;
+}
+const isWall = (lv, c) => lv.cell[c] === '#';
+const doorColor = (lv, c) => { const ch = lv.cell[c]; return ch >= 'A' && ch <= 'C' ? ch.toLowerCase() : null; };
+function stepCell(lv, c, d) {
+  if (d === WAIT) return c;
+  const x = c % lv.cols + DIRS[d][0], y = Math.floor(c / lv.cols) + DIRS[d][1];
+  if (x < 0 || y < 0 || x >= lv.cols || y >= lv.rows) return -1;
+  const n = y * lv.cols + x;
+  return isWall(lv, n) ? -1 : n;
+}
+// An echo is the list of cells it was on, turn by turn (it stays on its last cell).
+const echoAt = (e, t) => e[Math.min(t, e.length - 1)];
+// Are all pads of a colour pressed by these bodies?
+function pressed(lv, col, bodies) { return lv.pads[col] && lv.pads[col].every(p => bodies.includes(p)); }
+// Is a door cell open at turn t for the given bodies (and echoes holding it)?
+function doorOpen(lv, c, bodies) { const col = doorColor(lv, c); return !col || pressed(lv, col, bodies) || bodies.includes(c); }
+// Bo's step from cell p at turn t (to turn t + 1); returns the new cell or -1.
+function tryStep(lv, echoes, p, t, d) {
+  const q = stepCell(lv, p, d);
+  if (q < 0) return -1;
+  if (q === p) return q;
+  const col = doorColor(lv, q);
+  if (!col) return q;
+  const now = echoes.map(e => echoAt(e, t + 1)), before = echoes.map(e => echoAt(e, t));
+  // Open if its pads are pressed after the step, or an echo holds the doorway.
+  if (pressed(lv, col, [...now, q])) return q;
+  if (echoes.some((e, k) => now[k] === q && before[k] === q)) return q;
+  return -1;
+}
+
+// ---------- solver
+// All walks are searched together, turn by turn: the echoes already made
+// (fixed), Bo (forced along its walk so far), and the walks still to come.
+// A walk's step only depends on the earlier walks, never on later ones, so
+// this is the same as playing the walks one after another. The cost is the
+// total of turns still to spend; the last walk must reach the portal, and no
+// earlier walk may step on it (that would win at once).
+function legal(lv, p, q, before, after) {
+  if (q === p) return true;
+  const col = doorColor(lv, q);
+  if (!col) return true;
+  if (pressed(lv, col, [...after, q])) return true;
+  for (let k = 0; k < after.length; k++) if (before[k] === q && after[k] === q) return true;
+  return false;
+}
+// Fewest more turns to win with `fixed` echoes, Bo's walk so far `prefix`,
+// and `left` rewinds left (Infinity when there is no way).
+function solve(lv, fixed, prefix, left) {
+  let best = Infinity;
+  for (let u = 1; u <= left + 1; u++) best = Math.min(best, solveWalks(lv, fixed, prefix, u));
+  return best;
+}
+function solveWalks(lv, fixed, prefix, u) {
+  const P = prefix.length - 1;
+  const tcap = Math.max(P, 0, ...fixed.map(e => e.length - 1));
+  const start = { t: 0, pos: new Array(u).fill(lv.start), mask: (1 << u) - 1 };
+  const buckets = [[start]], seen = new Set();
+  const keyOf = s => Math.min(s.t, tcap + 1) + '|' + s.pos.join(',') + '|' + s.mask;
+  for (let cost = 0; cost < buckets.length; cost++) {
+    for (const s of buckets[cost] || []) {
+      const k = keyOf(s);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      if (s.pos[u - 1] === lv.exit && (u > 1 || s.t >= P)) return cost;
+      const before = fixed.map(e => echoAt(e, s.t)), after = fixed.map(e => echoAt(e, s.t + 1));
+      // Build each walk's next cell in order, earlier walks first.
+      const build = (i, nb, na, npos, mask, add) => {
+        if (i === u) {
+          const ns = { t: s.t + 1, pos: npos, mask };
+          (buckets[cost + add] = buckets[cost + add] || []).push(ns);
+          return;
+        }
+        const p = s.pos[i], active = (s.mask >> i) & 1, last = i === u - 1;
+        if (!active) { build(i + 1, [...nb, p], [...na, p], [...npos, p], mask, add); return; }
+        if (i === 0 && s.t < P) {
+          const q = prefix[s.t + 1];
+          build(i + 1, [...nb, p], [...na, q], [...npos, q], mask, add);
+          return;
+        }
+        // Stop this walk here (Rewind): not the last walk, and only after a turn.
+        if (!last && s.t > 0) build(i + 1, [...nb, p], [...na, p], [...npos, p], mask & ~(1 << i), add);
+        for (let d = 0; d < 5; d++) {
+          const q = stepCell(lv, p, d);
+          if (q < 0 || (!last && q === lv.exit) || !legal(lv, p, q, nb, na)) continue;
+          build(i + 1, [...nb, p], [...na, q], [...npos, q], mask, add + 1);
+        }
+      };
+      build(0, before, after, [], s.mask, 0);
+    }
+  }
+  return Infinity;
+}
+
+// The best next action from the current state: 0-3 steps, 4 wait, 5 rewind.
+function bestAction(lv, echoes, left, traj) {
+  let best = Infinity, act = -1;
+  const p = traj[traj.length - 1], t = traj.length - 1;
+  for (let d = 0; d < 5; d++) {
+    const q = tryStep(lv, echoes, p, t, d);
+    if (q < 0) continue;
+    const c = q === lv.exit ? 1 : 1 + solve(lv, echoes, [...traj, q], left);
+    if (c < best) { best = c; act = d; }
+  }
+  if (left > 0 && t > 0) {
+    const c = solve(lv, [...echoes, traj], [lv.start], left - 1);
+    if (c < best) { best = c; act = 5; }
+  }
+  return { act, cost: best };
+}
+
+// ---------- state
+let state = 'intro', T = 0, levelNo = 0, lv = null;
+let traj = [], echoes = [], history = [], turns = 0, hintUsed = false, hint = null, stars = 0, winAt = -1;
+let anim = null, bump = null, swipe = null, sparkles = [], ripple = -1, fx = [];
+let progress = {};
+try { progress = JSON.parse(localStorage.getItem('echobot') || '{}'); } catch (e) { /* storage off */ }
+
+function startLevel(i) {
+  levelNo = Math.max(0, Math.min(LEVELS.length - 1, i));
+  lv = parse(levelNo);
+  lv.par = solve(lv, [], [lv.start], lv.echoes);
+  traj = [lv.start]; echoes = []; history = []; turns = 0; hintUsed = false; hint = null; winAt = -1; anim = null; bump = null; sparkles = []; ripple = -1;
+  state = 'play';
+}
+const pip = () => traj[traj.length - 1];
+const now = () => traj.length - 1;
+const leftEchoes = () => lv.echoes - echoes.length;
+function busy() { return (anim && T - anim.t < anim.dur) || winAt >= 0; }
+
+function act(d) {
+  if (state !== 'play' || busy()) return;
+  audio();
+  const p = pip(), t = now();
+  const q = tryStep(lv, echoes, p, t, d);
+  if (q < 0) { const q0 = stepCell(lv, p, d); bump = { d, t: T, closed: q0 >= 0 && !!doorColor(lv, q0) }; sBump(); return; }
+  history.push({ kind: 'step' });
+  anim = { t: T, dur: .16, from: t };
+  traj.push(q); turns++; hint = null;
+  if (d === WAIT) sWait(); else sStep();
+  // Pads that get pressed this turn chime.
+  for (const col in lv.pads) if (pressed(lv, col, bodiesAt(t + 1)) && !pressed(lv, col, bodiesAt(t))) sPad();
+  if (q === lv.exit) {
+    winAt = T + .16;
+    stars = turns <= lv.par ? 3 : turns <= lv.par + 3 ? 2 : 1;
+    if (hintUsed) stars = Math.min(stars, 2);
+    if ((progress[levelNo] || 0) < stars) { progress[levelNo] = stars; try { localStorage.setItem('echobot', JSON.stringify(progress)); } catch (e) { /* storage off */ } }
+  }
+}
+function rewind() {
+  if (state !== 'play' || busy() || leftEchoes() <= 0 || now() === 0) return;
+  audio();
+  history.push({ kind: 'rewind', traj });
+  echoes.push(traj.slice());
+  traj = [lv.start]; hint = null; ripple = T; sRewind();
+}
+function undo() {
+  if (state !== 'play' || busy() || !history.length) return;
+  audio(); sClick();
+  const h = history.pop();
+  if (h.kind === 'step') { traj.pop(); turns--; }
+  else { echoes.pop(); traj = h.traj; }
+  hint = null;
+}
+function restart() { if (state !== 'play') return; audio(); sClick(); startLevel(levelNo); }
+function showHint() {
+  if (state !== 'play' || busy()) return;
+  audio(); sClick();
+  hintUsed = true;
+  const b = bestAction(lv, echoes, leftEchoes(), traj);
+  hint = b.act < 0 || b.cost === Infinity ? { stuck: true, t: T } : { act: b.act, left: b.cost, t: T };
+}
+function bodiesAt(t) { return [...echoes.map(e => echoAt(e, t)), traj[Math.min(t, traj.length - 1)]]; }
+function update() {
+  if (winAt >= 0 && T > winAt + .8 && state === 'play') { state = 'won'; sWin(); }
+}
+
+// ---------- layout
+function boardRect() {
+  const cs = Math.min(330 / lv.cols, 380 / lv.rows), w = cs * lv.cols, h = cs * lv.rows;
+  return { x: (W - w) / 2, y: 150 + (380 - h) / 2, cs, w, h };
+}
+function cellXY(c) { return [c % lv.cols, Math.floor(c / lv.cols)]; }
+function center(c) { const b = boardRect(), [x, y] = cellXY(c); return [b.x + (x + .5) * b.cs, b.y + (y + .5) * b.cs]; }
+// Where a body is drawn: between its cells while a turn animates.
+function bodyPos(path, t) {
+  const a = center(echoAt(path, t));
+  if (!anim || T - anim.t >= anim.dur || t !== anim.from + 1) return a;
+  const b = center(echoAt(path, t - 1)), u = easeOut((T - anim.t) / anim.dur);
+  return [b[0] + (a[0] - b[0]) * u, b[1] + (a[1] - b[1]) * u];
+}
+const easeOut = u => 1 - Math.pow(1 - Math.min(1, u), 3);
+
+// ---------- drawing helpers
+function rrect(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+function ell(x, y, rx, ry, col, rot = 0) { ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(x, y, Math.max(.1, rx), Math.max(.1, ry), rot, 0, TAU); ctx.fill(); }
+function lin(x0, y0, x1, y1, stops) { const g = ctx.createLinearGradient(x0, y0, x1, y1); stops.forEach(([o, c]) => g.addColorStop(o, c)); return g; }
+function rad(x, y, r, stops) { const g = ctx.createRadialGradient(x, y, 0, x, y, r); stops.forEach(([o, c]) => g.addColorStop(o, c)); return g; }
+function text(s, x, y, size, col, weight = 800, align = 'center') { ctx.fillStyle = col; ctx.font = `${weight} ${size}px "Trebuchet MS", system-ui, sans-serif`; ctx.textAlign = align; ctx.fillText(s, x, y); }
+function wrapText(s, maxW, size) {
+  ctx.font = `700 ${size}px "Trebuchet MS", system-ui, sans-serif`;
+  const out = []; let line = '';
+  for (const w of s.split(' ')) { const t = line ? line + ' ' + w : w; if (ctx.measureText(t).width > maxW && line) { out.push(line); line = w; } else line = t; }
+  if (line) out.push(line);
+  return out;
+}
+function pill(x, y, w, h) {
+  ctx.fillStyle = 'rgba(90,60,160,.14)'; rrect(x, y + 3, w, h, h / 2); ctx.fill();
+  ctx.fillStyle = lin(0, y, 0, y + h, [[0, '#ffffff'], [1, '#f5f0ff']]); rrect(x, y, w, h, h / 2); ctx.fill();
+  ctx.strokeStyle = 'rgba(120,90,200,.25)'; ctx.lineWidth = 1; ctx.stroke();
+}
+const PAD = { a: ['#ff7eb3', '#e0477f', '#ffd0e3'], b: ['#ffcf4a', '#e09a00', '#fff0b8'], c: ['#5fd39a', '#2c9f63', '#c8f5dd'] };
+
+// ---------- scene
+function drawBackdrop() {
+  ctx.fillStyle = lin(0, 0, 0, H, [[0, '#d9ccff'], [.4, '#efe8ff'], [1, '#f8f5ff']]); ctx.fillRect(0, 0, W, H);
+  // Soft lab shelves with toy shapes.
+  ctx.fillStyle = 'rgba(140,110,220,.12)';
+  for (const [x, y, r] of [[40, 110, 16], [320, 96, 20], [300, 600, 26], [50, 590, 18]]) { ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill(); }
+  ctx.fillStyle = 'rgba(140,110,220,.1)'; rrect(250, 112, 44, 28, 8); ctx.fill(); rrect(70, 92, 30, 30, 6); ctx.fill();
+}
+function drawBoard() {
+  const b = boardRect();
+  ctx.fillStyle = 'rgba(80,50,150,.18)'; rrect(b.x - 10, b.y - 6, b.w + 20, b.h + 20, 20); ctx.fill();
+  ctx.fillStyle = '#ffffff'; rrect(b.x - 10, b.y - 10, b.w + 20, b.h + 20, 20); ctx.fill();
+  for (let c = 0; c < lv.cell.length; c++) {
+    const [x, y] = cellXY(c), px = b.x + x * b.cs, py = b.y + y * b.cs;
+    if (isWall(lv, c)) continue;
+    ctx.fillStyle = (x + y) % 2 ? '#e9e1ff' : '#f2ecff'; ctx.fillRect(px, py, b.cs + .5, b.cs + .5);
+  }
+  // Walls: raised soft blocks.
+  for (let c = 0; c < lv.cell.length; c++) {
+    if (!isWall(lv, c)) continue;
+    const [x, y] = cellXY(c), px = b.x + x * b.cs, py = b.y + y * b.cs, s = b.cs;
+    ctx.fillStyle = '#9d86d9'; rrect(px + 2, py + 5, s - 4, s - 4, 8); ctx.fill();
+    ctx.fillStyle = lin(0, py, 0, py + s, [[0, '#cbbcf5'], [1, '#b3a0ea']]); rrect(px + 2, py + 1, s - 4, s - 7, 8); ctx.fill();
+    ell(px + s * .32, py + s * .22, s * .14, s * .05, 'rgba(255,255,255,.5)');
+  }
+}
+function drawPortal() {
+  const [cx, cy] = center(lv.exit), r = boardRect().cs * .38;
+  ctx.fillStyle = rad(cx, cy, r * 1.5, [[0, 'rgba(255,230,120,.7)'], [1, 'rgba(255,230,120,0)']]); ctx.beginPath(); ctx.arc(cx, cy, r * 1.5, 0, TAU); ctx.fill();
+  for (let k = 0; k < 3; k++) {
+    ctx.strokeStyle = ['#b98bff', '#7fc8ff', '#ffb3e0'][k]; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(cx, cy, r * (.95 - k * .2), T * (1 + k * .5) + k, T * (1 + k * .5) + k + 4.2); ctx.stroke();
+  }
+  star(cx, cy, r * .45, '#ffd34a', '#e09a00');
+}
+function star(x, y, r, fill, edge) {
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * .47 : r; ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); }
+  ctx.closePath(); ctx.fillStyle = fill; ctx.fill(); if (edge) { ctx.strokeStyle = edge; ctx.lineWidth = 1.2; ctx.stroke(); }
+}
+function drawPads(t) {
+  const bodies = bodiesAt(t), cs = boardRect().cs;
+  for (const col in lv.pads) for (const p of lv.pads[col]) {
+    const [cx, cy] = center(p), on = bodies.includes(p), [c1, c2, c3] = PAD[col];
+    ell(cx, cy + 3, cs * .36, cs * .3, 'rgba(60,30,120,.18)');
+    ell(cx, cy, cs * .36, cs * .3, c2);
+    ell(cx, cy - (on ? 0 : 3), cs * .3, cs * .24, on ? c3 : c1);
+    if (on) { ctx.fillStyle = rad(cx, cy, cs * .5, [[0, c1 + 'aa'], [1, c1 + '00']]); ctx.beginPath(); ctx.arc(cx, cy, cs * .5, 0, TAU); ctx.fill(); }
+  }
+}
+function drawDoors(t) {
+  const bodies = bodiesAt(t), b = boardRect(), cs = b.cs;
+  for (const col in lv.doors) for (const d of lv.doors[col]) {
+    const open = doorOpen(lv, d, bodies), [x, y] = cellXY(d), px = b.x + x * cs, py = b.y + y * cs, [c1, c2, c3] = PAD[col];
+    // The frame.
+    ctx.fillStyle = c2; rrect(px + 2, py + 2, cs - 4, 6, 3); ctx.fill(); rrect(px + 2, py + cs - 8, cs - 4, 6, 3); ctx.fill();
+    if (open) {
+      ctx.strokeStyle = c1 + '88'; ctx.lineWidth = 1.5; ctx.setLineDash([4, 4]); rrect(px + 5, py + 8, cs - 10, cs - 16, 6); ctx.stroke(); ctx.setLineDash([]);
+    } else {
+      for (let k = 0; k < 3; k++) {
+        const bx = px + cs * (.22 + k * .28);
+        ctx.fillStyle = lin(bx - 4, 0, bx + 4, 0, [[0, c2], [.5, c1], [1, c2]]); rrect(bx - 4, py + 6, 8, cs - 12, 4); ctx.fill();
+      }
+      // A little pad sign on the door: how many pads open it.
+      const n = lv.pads[col].length;
+      for (let k = 0; k < n; k++) { ell(px + cs / 2 + (k - (n - 1) / 2) * 11, py + cs / 2, 5, 4, '#ffffff'); ell(px + cs / 2 + (k - (n - 1) / 2) * 11, py + cs / 2, 3.5, 2.6, c1); }
+    }
+  }
+}
+// Bo, or an echo (ghost, with its number).
+function drawBot(x, y, s, ghost, num, face, t) {
+  const bob = ghost ? Math.sin(T * 3 + num) * 1.5 : 0;
+  ctx.save(); ctx.translate(x, y + bob); ctx.scale(s, s);
+  if (ghost) ctx.globalAlpha = .55;
+  ell(0, 15, 12, 3.5, ghost ? 'rgba(60,140,220,.35)' : 'rgba(60,30,120,.25)');
+  const body = ghost ? ['#bfe9ff', '#6cc4f5'] : ['#ffffff', '#d8ccf5'];
+  // Antenna.
+  ctx.strokeStyle = ghost ? '#6cc4f5' : '#9d86d9'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, -15); ctx.lineTo(0, -21); ctx.stroke();
+  ell(0, -22, 3, 3, ghost ? '#8fd8ff' : '#ff7eb3');
+  // Head and body.
+  ctx.fillStyle = lin(0, -16, 0, 14, [[0, body[0]], [1, body[1]]]); rrect(-13, -16, 26, 30, 11); ctx.fill();
+  ctx.strokeStyle = ghost ? '#4aa8e0' : '#a690e0'; ctx.lineWidth = 1.4; ctx.stroke();
+  // Visor with eyes looking where Bo went.
+  const lx = face === 1 ? 2 : face === 3 ? -2 : 0, ly = face === 0 ? -1.5 : face === 2 ? 1 : 0;
+  ctx.fillStyle = ghost ? '#2a5a8a' : '#2a2050'; rrect(-10, -11, 20, 12, 6); ctx.fill();
+  const blink = !ghost && (T % 3.3) < .1;
+  if (blink) { ctx.fillStyle = '#7ff0ff'; ctx.fillRect(-6 + lx, -5 + ly, 4, 1.5); ctx.fillRect(2 + lx, -5 + ly, 4, 1.5); }
+  else { ell(-4 + lx, -5 + ly, 2.4, 3, '#7ff0ff'); ell(4 + lx, -5 + ly, 2.4, 3, '#7ff0ff'); }
+  // Cheeks and a belly light.
+  if (!ghost) { ell(-9, 4, 2.4, 1.5, 'rgba(255,126,179,.6)'); ell(9, 4, 2.4, 1.5, 'rgba(255,126,179,.6)'); }
+  ell(0, 7, 3, 3, ghost ? '#8fd8ff' : '#ffcf4a');
+  // Little wheels.
+  ell(-7, 14, 3.5, 2.5, ghost ? '#4aa8e0' : '#7a68b8'); ell(7, 14, 3.5, 2.5, ghost ? '#4aa8e0' : '#7a68b8');
+  ctx.restore();
+  if (ghost) {
+    ctx.fillStyle = '#3a9ae0'; ctx.beginPath(); ctx.arc(x + 11 * s, y - 15 * s, 7, 0, TAU); ctx.fill();
+    text(`${num}`, x + 11 * s, y - 15 * s + 4, 10, '#ffffff', 900);
+  }
+}
+function faceOf(path, t) {
+  for (let k = Math.min(t, path.length - 1); k > 0; k--) {
+    const a = path[k - 1], b = path[k];
+    if (a !== b && a >= 0 && b >= 0) { const d = b - a; return d === 1 ? 1 : d === -1 ? 3 : d > 0 ? 2 : 0; }
+  }
+  return 2;
+}
+function drawBodies(t) {
+  const cs = boardRect().cs, s = cs / 44;
+  // Echo future paths as faint dots, so you can plan around them.
+  echoes.forEach(e => {
+    for (let k = t + 1; k < e.length; k++) { const [x, y] = center(e[k]); ell(x, y + cs * .25, 2.2, 2.2, 'rgba(60,150,230,.35)'); }
+  });
+  echoes.forEach((e, i) => { const [x, y] = bodyPos(e, t); drawBot(x, y, s, true, i + 1, faceOf(e, t), t); });
+  let [x, y] = bodyPos(traj, t);
+  if (bump && T - bump.t < .25 && bump.d < 4) { const k = Math.sin((T - bump.t) / .25 * Math.PI) * 5; x += DIRS[bump.d][0] * k; y += DIRS[bump.d][1] * k; }
+  drawBot(x, y, s, false, 0, faceOf(traj, t), t);
+}
+function drawHintMark() {
+  if (!hint || hint.stuck || state !== 'play' || busy()) return;
+  const pulse = .5 + .5 * Math.sin(T * 5);
+  if (hint.act < 4) {
+    const [x, y] = center(pip()), cs = boardRect().cs, [dx, dy] = DIRS[hint.act], r = cs * .2 * (1.2 + pulse * .2);
+    ctx.save(); ctx.translate(x + dx * cs * .62, y + dy * cs * .62); ctx.rotate(Math.atan2(dy, dx));
+    ctx.fillStyle = '#ffcf3a'; ctx.strokeStyle = '#e08a00'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(r, 0); ctx.lineTo(-r * .7, -r * .85); ctx.lineTo(-r * .35, 0); ctx.lineTo(-r * .7, r * .85); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.restore();
+  }
+}
+function drawRipple() {
+  if (ripple < 0 || T - ripple > .7) return;
+  const u = (T - ripple) / .7, [x, y] = center(lv.start);
+  for (let k = 0; k < 3; k++) { ctx.strokeStyle = `rgba(80,170,240,${(1 - u) * .6})`; ctx.lineWidth = 3; const r = 20 + u * 140 - k * 18; if (r <= 1) continue; ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.stroke(); }
+}
+
+function drawHud() {
+  text('E C H O   B O T', 180, 24, 13, '#7a5ad0', 800);
+  pill(12, 32, 122, 38);
+  text('‹', 26, 58, 20, levelNo > 0 ? '#7a5ad0' : 'rgba(122,90,208,.3)', 800);
+  text(`Level ${levelNo + 1}`, 73, 57, 15, '#4a3590', 800);
+  text('›', 120, 58, 20, levelNo < LEVELS.length - 1 ? '#7a5ad0' : 'rgba(122,90,208,.3)', 800);
+  pill(142, 32, 112, 38);
+  text(`${turns}`, 168, 59, 22, '#3a2a78', 900);
+  text('turns', 210, 48, 10, '#8a7ac0', 700);
+  text(`best ${lv.par}`, 210, 63, 12, '#6a4ac0', 800);
+  pill(262, 32, 86, 38);
+  // Echoes left as little bot heads.
+  text('echoes', 305, 47, 9, '#8a7ac0', 700);
+  for (let k = 0; k < lv.echoes; k++) { const on = k < leftEchoes(); ell(290 + k * 22 - (lv.echoes - 1) * 0, 59, 7, 6, on ? '#6cc4f5' : 'rgba(108,196,245,.25)'); }
+  if (!lv.echoes) text('none', 305, 63, 11, '#b0a4d8', 700);
+  // The level title and turn clock.
+  text(lv.title, 180, 98, 17, '#4a3590', 900);
+  text(`turn ${now()}`, 180, 118, 11, '#8a7ac0', 700);
+  // A small restart button.
+  pill(300, 84, 48, 28); text('↺', 324, 104, 16, '#7a5ad0', 900);
+  // A turn bar: each echo's walk length, with a marker at now.
+  const maxLen = Math.max(1, ...echoes.map(e => e.length - 1), now());
+  echoes.forEach((e, i) => {
+    const y = 128 + i * 7, w = 160 * (e.length - 1) / maxLen;
+    ctx.fillStyle = 'rgba(108,196,245,.35)'; rrect(100, y, 160, 4, 2); ctx.fill();
+    ctx.fillStyle = '#6cc4f5'; rrect(100, y, Math.max(4, w), 4, 2); ctx.fill();
+  });
+  if (echoes.length) { const x = 100 + 160 * Math.min(1, now() / maxLen); ctx.fillStyle = '#ff7eb3'; ctx.beginPath(); ctx.arc(x, 130 + (echoes.length - 1) * 3.5, 4, 0, TAU); ctx.fill(); }
+}
+const BTN_Y = 538;
+const BTNS = [{ id: 'undo', x: 12, w: 78, label: 'Undo' }, { id: 'wait', x: 96, w: 78, label: 'Wait' }, { id: 'rewind', x: 180, w: 96, label: 'Rewind' }, { id: 'hint', x: 282, w: 66, label: 'Hint' }];
+function drawButtons() {
+  const y = BTN_Y, h = 50;
+  for (const bt of BTNS) {
+    let off = false, glow = false;
+    if (bt.id === 'undo') off = !history.length;
+    if (bt.id === 'rewind') { off = leftEchoes() <= 0 || now() === 0; glow = hint && hint.act === 5; }
+    if (bt.id === 'wait') glow = hint && hint.act === 4;
+    ctx.globalAlpha = off ? .4 : 1;
+    const main = bt.id === 'rewind';
+    ctx.fillStyle = main ? '#3a8ad0' : '#b3a0ea'; rrect(bt.x, y + 5, bt.w, h, 18); ctx.fill();
+    ctx.fillStyle = main ? lin(0, y, 0, y + h, [[0, '#8fd8ff'], [1, '#4aa8e0']]) : lin(0, y, 0, y + h, [[0, '#ffffff'], [1, '#f1ebff']]); rrect(bt.x, y, bt.w, h, 18); ctx.fill();
+    if (glow) { ctx.strokeStyle = '#ffb300'; ctx.lineWidth = 3 + Math.sin(T * 6) * 1.2; rrect(bt.x - 2, y - 2, bt.w + 4, h + 4, 20); ctx.stroke(); }
+    text(bt.label, bt.x + bt.w / 2, y + 22, 14, main ? '#ffffff' : '#4a3590', 800);
+    if (main) text(`${leftEchoes()} left`, bt.x + bt.w / 2, y + 38, 10, 'rgba(255,255,255,.85)', 700);
+    else if (bt.id === 'wait') text('stand still', bt.x + bt.w / 2, y + 38, 9, '#8a7ac0', 700);
+    else if (bt.id === 'undo') text('one turn', bt.x + bt.w / 2, y + 38, 9, '#8a7ac0', 700);
+    else text('-1 star', bt.x + bt.w / 2, y + 38, 9, '#8a7ac0', 700);
+    ctx.globalAlpha = 1;
+  }
+  let msg = lv.tip, col = '#7a6ab0';
+  if (hint && hint.stuck) { msg = 'No way to the portal from here. Undo or restart!'; col = '#e0603a'; }
+  else if (hint) { msg = hint.act === 5 ? `Press Rewind now. ${hint.left} turns to go.` : hint.act === 4 ? `Wait one turn. ${hint.left} turns to go.` : `Step ${DIR_NAMES[hint.act]}. ${hint.left} turns to go.`; col = '#c08000'; }
+  else if (bump && T - bump.t < 1.2 && bump.closed) { msg = 'That door is closed. Its pads must all be pressed.'; col = '#e0603a'; }
+  wrapText(msg, 340, 12).forEach((l, i, all) => text(l, 180, 628 - (all.length - 1 - i) * 15, 12, col, 700));
+}
+
+let btnY = 0;
+function button(x, y, w, h, label, main = true) {
+  ctx.fillStyle = main ? '#3f9e62' : '#b3a0ea'; rrect(x, y + 5, w, h, h / 2); ctx.fill();
+  ctx.fillStyle = main ? lin(0, y, 0, y + h, [[0, '#74d394'], [1, '#4fb874']]) : lin(0, y, 0, y + h, [[0, '#ffffff'], [1, '#f1ebff']]); rrect(x, y, w, h, h / 2); ctx.fill();
+  text(label, x + w / 2, y + h / 2 + (main ? 7 : 5), main ? 19 : 14, main ? '#ffffff' : '#4a3590', 800);
+}
+function card(title, lines, y0, h) {
+  ctx.fillStyle = 'rgba(50,30,110,.45)'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = 'rgba(50,30,110,.25)'; rrect(26, y0 + 8, 308, h, 26); ctx.fill();
+  ctx.fillStyle = lin(0, y0, 0, y0 + h, [[0, '#ffffff'], [1, '#f3eeff']]); rrect(26, y0, 308, h, 26); ctx.fill();
+  text(title, 180, y0 + 46, 26, '#5a3ab0', 900);
+  lines.forEach((l, i) => text(l, 180, y0 + 78 + i * 22, 14, '#4a3a6a', 500));
+}
+function drawCards() {
+  if (state === 'intro') {
+    card('Echo Bot', ['Walk Bo to the star portal.', 'A door opens while its pads are pressed.', 'Press Rewind: your walk becomes an echo', 'that does it again, step for step,', 'while you start over. Team up with you!'], 110, 380);
+    drawBot(150, 330, 1.3, false, 0, 1, 0); drawBot(210, 330, 1.3, true, 1, 3, 0);
+    button(80, 380, 200, 56, "Let's go"); btnY = 380;
+    text('draft 1  ·  sound on', 180, 470, 11, '#9a8ac0', 500);
+  } else if (state === 'won') {
+    const last = levelNo === LEVELS.length - 1;
+    card(`Level ${levelNo + 1}`, [stars === 3 ? 'Best plan!' : `${turns} turns. Best is ${lv.par}.`, hintUsed ? 'A hint helped: up to two stars.' : stars < 3 ? `Try it in ${lv.par} turns for three stars.` : ''], 150, 290);
+    for (let i = 0; i < 3; i++) star(124 + i * 56, 286, 22, i < stars ? '#ffc93a' : 'rgba(150,130,210,.3)', i < stars ? '#e09a00' : null);
+    button(80, 322, 200, 54, last ? 'Play again' : 'Next level'); btnY = 322;
+    ctx.fillStyle = 'rgba(122,90,208,.14)'; rrect(120, 392, 120, 30, 15); ctx.fill(); text('Replay', 180, 412, 13, '#4a3590', 800);
+  }
+}
+
+// ---------- sound
+let AC = null, master = null;
+function audio() {
+  if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+  try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return; }
+  master = AC.createGain(); master.gain.value = .6; master.connect(AC.destination);
+}
+function tone(f, when, dur, vol, type = 'sine', to = 0) {
+  if (!AC) return;
+  const o = AC.createOscillator(), g = AC.createGain(); o.type = type; o.frequency.setValueAtTime(f, when);
+  if (to) o.frequency.exponentialRampToValueAtTime(to, when + dur);
+  g.gain.setValueAtTime(0, when); g.gain.linearRampToValueAtTime(vol, when + .012); g.gain.exponentialRampToValueAtTime(.0005, when + dur);
+  o.connect(g); g.connect(master); o.start(when); o.stop(when + dur + .05);
+}
+function sStep() { if (AC) tone(520, AC.currentTime, .06, .05, 'triangle'); }
+function sWait() { if (AC) tone(380, AC.currentTime, .08, .04, 'sine'); }
+function sBump() { if (AC) tone(150, AC.currentTime, .1, .07, 'triangle'); }
+function sPad() { if (AC) { const t = AC.currentTime; tone(784, t, .12, .05, 'triangle'); tone(1175, t + .06, .14, .05, 'triangle'); } }
+function sRewind() { if (AC) { const t = AC.currentTime; tone(1200, t, .35, .05, 'sine', 300); tone(900, t + .05, .3, .04, 'triangle', 250); } }
+function sWin() { if (!AC) return; const t = AC.currentTime; [523, 659, 784, 1047].forEach((f, i) => tone(f, t + i * .1, .45, .07, 'triangle')); }
+function sClick() { if (AC) tone(880, AC.currentTime, .04, .05, 'triangle'); }
+
+// ---------- input
+function pagePos(e) { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) / scale, (e.clientY - r.top) / scale]; }
+cv.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  const [x, y] = pagePos(e);
+  audio();
+  if (state === 'intro') { if (y >= btnY && y <= btnY + 60) { sClick(); startLevel(levelNo); } return; }
+  if (state === 'won') {
+    if (y >= btnY && y <= btnY + 60) { sClick(); startLevel(levelNo === LEVELS.length - 1 ? 0 : levelNo + 1); }
+    else if (y >= 390 && y <= 425) { sClick(); startLevel(levelNo); }
+    return;
+  }
+  if (y >= 30 && y <= 72 && x < 136) { sClick(); if (x < 50) startLevel(levelNo - 1); else if (x > 100) startLevel(levelNo + 1); return; }
+  if (y >= 80 && y <= 116 && x > 296) { restart(); return; }
+  if (y >= BTN_Y && y <= BTN_Y + 56) { for (const bt of BTNS) if (x >= bt.x && x <= bt.x + bt.w) ({ undo, wait: () => act(WAIT), rewind, hint: showHint })[bt.id](); return; }
+  swipe = { x, y };
+});
+cv.addEventListener('pointerup', e => {
+  if (!swipe || state !== 'play') { swipe = null; return; }
+  const [x, y] = pagePos(e), dx = x - swipe.x, dy = y - swipe.y; swipe = null;
+  if (Math.hypot(dx, dy) > 18) { act(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 1 : 3) : (dy > 0 ? 2 : 0)); return; }
+  const b = boardRect(), gx = Math.floor((x - b.x) / b.cs), gy = Math.floor((y - b.y) / b.cs);
+  if (gx < 0 || gy < 0 || gx >= lv.cols || gy >= lv.rows) return;
+  const [px, py] = cellXY(pip());
+  if (gx === px && gy === py) act(WAIT);
+  else if (Math.abs(gx - px) + Math.abs(gy - py) === 1) act(gx > px ? 1 : gx < px ? 3 : gy > py ? 2 : 0);
+});
+addEventListener('keydown', e => {
+  const k = { ArrowUp: 0, ArrowRight: 1, ArrowDown: 2, ArrowLeft: 3 }[e.key];
+  if (state === 'intro' && e.key === 'Enter') { audio(); startLevel(levelNo); return; }
+  if (state === 'won' && e.key === 'Enter') { audio(); startLevel(levelNo + 1); return; }
+  if (k !== undefined) { e.preventDefault(); act(k); }
+  if (e.key === ' ') { e.preventDefault(); act(WAIT); }
+  if (e.key === 'r') rewind();
+  if (e.key === 'z' || e.key === 'Backspace') undo();
+  if (e.key === 'h') showHint();
+});
+
+// ---------- frame
+let last = performance.now();
+function frame(nowMs) {
+  const dt = Math.min(.05, (nowMs - last) / 1000); last = nowMs; T += dt;
+  update();
+  ctx.setTransform(dpr * scale, 0, 0, dpr * scale, 0, 0);
+  drawBackdrop();
+  if (lv) {
+    const t = now();
+    drawBoard(); drawPortal(); drawPads(t); drawDoors(t); drawRipple(); drawHintMark(); drawBodies(t);
+    drawHud(); drawButtons();
+  }
+  drawCards();
+  requestAnimationFrame(frame);
+}
+
+// ---------- tests and screenshots
+levelNo = Number(Q.get('level') || 1) - 1;
+startLevel(levelNo); state = 'intro';
+// ?play=<plan prefix>: plays moves (u r d l w, * for Rewind) for screenshots.
+if (Q.has('play')) {
+  state = 'play';
+  for (const ch of Q.get('play') || '') { if (ch === '*') rewind(); else act('urdlw'.indexOf(ch)); anim = null; }
+}
+if (Q.has('hint')) { state = 'play'; showHint(); }
+if (Q.has('won')) { state = 'won'; stars = 2; turns = lv.par + 1; }
+window.__eb = { LEVELS, parse, solve, bestAction, tryStep, startLevel, act, rewind, undo, showHint, update, WAIT,
+  get lv() { return lv; }, get traj() { return traj; }, get echoes() { return echoes; }, get turns() { return turns; }, get state() { return state; },
+  get stars() { return stars; }, get hint() { return hint; }, tick: dt => { T += dt; update(); }, clearAnim: () => { anim = null; } };
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
