@@ -12,10 +12,12 @@ canvas{display:block;margin:0 auto}
 <body>
 <canvas id="c"></canvas>
 <script>
-// Cupcake Check, draft 2: cupcakes roll through a check window. Toss the ones
+// Cupcake Check, draft 3: cupcakes roll through a check window. Toss the ones
 // the order names, box the rest. A new order every 10 cupcakes.
-const W = 360, H = 640, LIVES = 3, PER_ORDER = 10, SPACING = 118, BELT_Y = 374, WIN_L = 128, WIN_R = 232, SPAWN_X = -40;
-const BIN = [70, 488], BOX = [290, 488], ORDER_PAUSE = 1.8, CAKE = 1.38, COUNTER_Y = 474;
+const W = 360, H = 640, LIVES = 3, PER_ORDER = 10, SPACING = 118, BELT_Y = 386, WIN_L = 128, WIN_R = 232, SPAWN_X = -40;
+const BIN = [70, 488], BOX = [290, 488], ORDER_PAUSE = 1.8, CAKE = 1.15, COUNTER_Y = 474;
+// The scanner arch: its opening is taller than a cupcake with a cherry.
+const ARCH_TOP = BELT_Y - 126;
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 let scale = 1, dpr = 1;
 function resize() {
@@ -172,19 +174,19 @@ function drawCupcake(it, x, y, s = 1, part = 'all') {
 
 // An order feature on a little plate, with its name below.
 function atomIcon(a, x, y) {
-  ell(x, y + 2, 25, 7, 'rgba(160,100,60,.18)');
-  ell(x, y, 25, 7, '#ffffff'); ell(x, y - .8, 19, 4.6, '#f6eee6');
+  ell(x, y + 2, 30, 8, 'rgba(160,100,60,.18)');
+  ell(x, y, 30, 8, '#ffffff'); ell(x, y - .8, 23, 5.4, '#f6eee6');
   const base = { frost: 'white', top: 'none', spr: 'no', seed: 7 };
-  if (a.f === 'frost') drawCupcake(Object.assign(base, { frost: a.v }), x, y + 22, .78, 'top');
+  if (a.f === 'frost') drawCupcake(Object.assign(base, { frost: a.v }), x, y + 25, .95, 'top');
   else if (a.f === 'top') {
-    drawCupcake(Object.assign(base, { top: a.v }), x, y + 22, .78, 'top');
-    if (a.v === 'none') { ctx.strokeStyle = '#e0553f'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y - 30, 9, 0, TAU); ctx.moveTo(x - 6.4, y - 36.4); ctx.lineTo(x + 6.4, y - 23.6); ctx.stroke(); }
+    drawCupcake(Object.assign(base, { top: a.v }), x, y + 25, .95, 'top');
+    if (a.v === 'none') { ctx.strokeStyle = '#e0553f'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y - 38, 11, 0, TAU); ctx.moveTo(x - 7.8, y - 45.8); ctx.lineTo(x + 7.8, y - 30.2); ctx.stroke(); }
   } else {
-    drawCupcake(Object.assign(base, { spr: a.v, seed: 3 }), x, y + 22, .78, 'top');
-    if (a.v === 'no') { ctx.strokeStyle = '#e0553f'; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(x - 16, y - 30); ctx.lineTo(x + 16, y - 4); ctx.stroke(); ctx.lineCap = 'butt'; }
+    drawCupcake(Object.assign(base, { spr: a.v, seed: 3 }), x, y + 25, .95, 'top');
+    if (a.v === 'no') { ctx.strokeStyle = '#e0553f'; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(x - 20, y - 36); ctx.lineTo(x + 20, y - 6); ctx.stroke(); ctx.lineCap = 'butt'; }
   }
   ctx.fillStyle = '#7a5236'; ctx.font = '700 11px "Trebuchet MS", system-ui, sans-serif'; ctx.textAlign = 'center';
-  ctx.fillText(LABEL[a.f][a.v], x, y + 22);
+  ctx.fillText(LABEL[a.f][a.v], x, y + 21);
 }
 
 // The order: a ticket pinned to a rail, with a coloured label and the features.
@@ -195,7 +197,7 @@ function drawCard() {
   ctx.save(); ctx.translate(180, y0 + h / 2); ctx.scale(pulse, pulse); ctx.translate(-180, -(y0 + h / 2));
   ctx.fillStyle = 'rgba(120,70,40,.2)'; rrect(16, y0 + 7, 328, h, 12); ctx.fill();
   ctx.fillStyle = lin(0, y0, 0, y0 + h, [[0, '#fffefa'], [1, '#fff4e4']]); rrect(16, y0 + 3, 328, h, 12); ctx.fill();
-  ctx.strokeStyle = fresh ? '#ff9a2a' : 'rgba(200,140,90,.45)'; ctx.lineWidth = fresh ? 3 : 1.2; ctx.stroke();
+  ctx.strokeStyle = fresh ? '#ff9a2a' : 'rgba(200,140,90,.45)'; ctx.lineWidth = fresh ? 2 : 1.2; ctx.stroke();
   // A clip at the top and a dashed tear line.
   ctx.fillStyle = '#9aa0ac'; rrect(166, y0 - 6, 28, 14, 4); ctx.fill(); ctx.fillStyle = '#c3c8d2'; rrect(170, y0 - 4, 20, 5, 2); ctx.fill();
   ctx.strokeStyle = 'rgba(200,140,90,.35)'; ctx.setLineDash([4, 4]); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(24, y0 + 30); ctx.lineTo(336, y0 + 30); ctx.stroke(); ctx.setLineDash([]);
@@ -205,50 +207,51 @@ function drawCard() {
   // The verb pill.
   const pill = toss ? ['#f27a63', '#c9503f', 'TOSS'] : ['#5fc282', '#3f9e62', 'BOX ONLY'];
   const pw = toss ? 74 : 98;
-  ctx.fillStyle = pill[1]; rrect(26, y0 + 50, pw, 34, 17); ctx.fill();
-  ctx.fillStyle = pill[0]; rrect(26, y0 + 47, pw, 34, 17); ctx.fill();
-  ctx.fillStyle = '#fff'; ctx.font = '900 16px "Trebuchet MS", system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.fillText(pill[2], 26 + pw / 2, y0 + 69);
+  ctx.fillStyle = pill[1]; rrect(26, y0 + 56, pw, 34, 17); ctx.fill();
+  ctx.fillStyle = pill[0]; rrect(26, y0 + 53, pw, 34, 17); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.font = '900 16px "Trebuchet MS", system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.fillText(pill[2], 26 + pw / 2, y0 + 75);
   const c = order.cond, left = 26 + pw, mid = (left + 340) / 2;
-  if (c.op === 'one') atomIcon(c.a, mid, y0 + 80);
+  if (c.op === 'one') atomIcon(c.a, mid, y0 + 84);
   else {
-    atomIcon(c.a, mid - 58, y0 + 80); atomIcon(c.b, mid + 58, y0 + 80);
-    ctx.fillStyle = c.op === 'or' ? '#ffcf5a' : '#9fc8ff'; rrect(mid - 21, y0 + 52, 42, 22, 11); ctx.fill();
-    ctx.fillStyle = '#5a3a1e'; ctx.font = '900 12px "Trebuchet MS", system-ui, sans-serif'; ctx.fillText(c.op.toUpperCase(), mid, y0 + 67);
+    atomIcon(c.a, mid - 62, y0 + 84); atomIcon(c.b, mid + 62, y0 + 84);
+    ctx.fillStyle = c.op === 'or' ? '#ffcf5a' : '#9fc8ff'; rrect(mid - 21, y0 + 59, 42, 22, 11); ctx.fill();
+    ctx.fillStyle = '#5a3a1e'; ctx.font = '900 12px "Trebuchet MS", system-ui, sans-serif'; ctx.fillText(c.op.toUpperCase(), mid, y0 + 74);
   }
   ctx.restore();
 }
 
 function drawFactory() {
-  // A bakery kitchen: wall, a shelf with jars, mint tiles, bunting.
-  ctx.fillStyle = lin(0, 192, 0, 330, [[0, '#fff3e4'], [1, '#ffe8d0']]); ctx.fillRect(0, 192, W, 140);
+  // A bakery kitchen: wall with dots, a shelf with jars, mint tiles, a counter.
+  const TILE_Y = BELT_Y - 70;
+  ctx.fillStyle = lin(0, 192, 0, TILE_Y, [[0, '#fff3e4'], [1, '#ffe8d0']]); ctx.fillRect(0, 192, W, TILE_Y - 192);
   ctx.fillStyle = 'rgba(255,190,150,.25)';
-  for (let y = 206; y < 330; y += 22) for (let x = (y / 22 % 2) * 11; x < W; x += 22) { ctx.beginPath(); ctx.arc(x, y, 1.6, 0, TAU); ctx.fill(); }
-  ctx.fillStyle = '#d8f1e6'; ctx.fillRect(0, 330, W, COUNTER_Y - 330);
+  for (let y = 204; y < TILE_Y; y += 22) for (let x = (y / 22 % 2) * 11; x < W; x += 22) { ctx.beginPath(); ctx.arc(x, y, 1.6, 0, TAU); ctx.fill(); }
+  ctx.fillStyle = '#d8f1e6'; ctx.fillRect(0, TILE_Y, W, COUNTER_Y - TILE_Y);
   ctx.strokeStyle = 'rgba(140,200,175,.6)'; ctx.lineWidth = 1;
-  for (let y = 330; y < COUNTER_Y; y += 18) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
-  for (let x = 0; x < W; x += 18) { ctx.beginPath(); ctx.moveTo(x, 330); ctx.lineTo(x, COUNTER_Y); ctx.stroke(); }
-  ctx.fillStyle = '#e9c49a'; ctx.fillRect(0, 326, W, 5);
-  // The shelf.
-  ctx.fillStyle = 'rgba(120,70,40,.15)'; ctx.fillRect(0, 262, W, 6);
-  ctx.fillStyle = lin(0, 254, 0, 262, [[0, '#d9a066'], [1, '#b8834c']]); ctx.fillRect(0, 254, W, 8);
-  for (const [x, col, hgt] of [[30, '#ffd1dc', 30], [62, '#d4f0ff', 24], [254, '#fff0b8', 28], [288, '#e0d4ff', 22]]) {
-    ctx.fillStyle = 'rgba(255,255,255,.7)'; rrect(x - 12, 254 - hgt, 24, hgt, 5); ctx.fill();
-    ctx.fillStyle = col; rrect(x - 10, 254 - hgt * .65, 20, hgt * .6, 4); ctx.fill();
-    ctx.fillStyle = '#c98a5a'; rrect(x - 13, 254 - hgt - 5, 26, 6, 3); ctx.fill();
-    ell(x - 5, 254 - hgt * .7, 2, 5, 'rgba(255,255,255,.6)');
+  for (let y = TILE_Y; y < COUNTER_Y; y += 18) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+  for (let x = 0; x < W; x += 18) { ctx.beginPath(); ctx.moveTo(x, TILE_Y); ctx.lineTo(x, COUNTER_Y); ctx.stroke(); }
+  ctx.fillStyle = '#e9c49a'; ctx.fillRect(0, TILE_Y - 4, W, 5);
+  // A shelf above the belt, either side of the scanner, with jars and a plant.
+  const SH = ARCH_TOP - 6;
+  for (const [x0, x1] of [[60, WIN_L - 18], [WIN_R + 18, W]]) {
+    ctx.fillStyle = 'rgba(120,70,40,.15)'; ctx.fillRect(x0, SH + 8, x1 - x0, 5);
+    ctx.fillStyle = lin(0, SH, 0, SH + 8, [[0, '#d9a066'], [1, '#b8834c']]); ctx.fillRect(x0, SH, x1 - x0, 8);
   }
-  // A little plant on the shelf.
-  ctx.fillStyle = '#e07a52'; rrect(320, 238, 22, 16, 3); ctx.fill();
-  for (const [dx, a] of [[-6, -.6], [0, 0], [6, .6]]) ell(331 + dx, 230, 4, 10, '#5fb44c', a);
-  // Bunting under the ticket rail.
-  for (let k = 0; k < 10; k++) { const x = k * 40 + 4; ctx.fillStyle = ['#ff9eb5', '#ffd166', '#8fd3a8', '#9fc8ff'][k % 4]; ctx.beginPath(); ctx.moveTo(x, 196); ctx.lineTo(x + 32, 196); ctx.lineTo(x + 16, 214); ctx.closePath(); ctx.fill(); }
-  ctx.strokeStyle = '#c98a5a'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(0, 196); ctx.lineTo(W, 196); ctx.stroke();
+  for (const [x, col, hgt] of [[78, '#ffd1dc', 26], [104, '#d4f0ff', 20], [258, '#fff0b8', 24], [286, '#e0d4ff', 19]]) {
+    ctx.fillStyle = 'rgba(255,255,255,.75)'; rrect(x - 10, SH - hgt, 20, hgt, 5); ctx.fill();
+    ctx.fillStyle = col; rrect(x - 8, SH - hgt * .65, 16, hgt * .6, 4); ctx.fill();
+    ctx.fillStyle = '#c98a5a'; rrect(x - 11, SH - hgt - 5, 22, 6, 3); ctx.fill();
+    ell(x - 4, SH - hgt * .7, 1.8, 4.5, 'rgba(255,255,255,.6)');
+  }
+  ctx.fillStyle = '#e07a52'; rrect(318, SH - 16, 22, 16, 3); ctx.fill();
+  for (const [dx, a] of [[-6, -.6], [0, 0], [6, .6]]) ell(329 + dx, SH - 24, 4, 10, '#5fb44c', a);
   // The counter.
   ctx.fillStyle = lin(0, COUNTER_Y, 0, COUNTER_Y + 12, [[0, '#e8b47c'], [1, '#c98a50']]); ctx.fillRect(0, COUNTER_Y, W, 12);
   ctx.fillStyle = lin(0, COUNTER_Y + 12, 0, 520, [[0, '#b8783f'], [1, '#9a6232']]); ctx.fillRect(0, COUNTER_Y + 12, W, 520 - COUNTER_Y - 12);
   ctx.strokeStyle = 'rgba(90,50,20,.25)'; for (let x = 60; x < W; x += 90) { ctx.beginPath(); ctx.moveTo(x, COUNTER_Y + 14); ctx.lineTo(x, 520); ctx.stroke(); }
-  // Belt legs, then the belt.
-  ctx.fillStyle = '#7a808c'; for (const x of [WIN_L - 4, WIN_R + 4]) { ctx.fillRect(x - 5, BELT_Y + 30, 10, COUNTER_Y - BELT_Y - 30); ctx.fillStyle = '#9aa0ac'; ctx.fillRect(x - 9, COUNTER_Y - 4, 18, 5); ctx.fillStyle = '#7a808c'; }
+  // The belt on two short legs, under the scanner's pillars.
+  ctx.fillStyle = '#8a8f9c';
+  for (const x of [WIN_L - 4, WIN_R + 4]) { ctx.fillRect(x - 4, BELT_Y + 30, 8, COUNTER_Y - BELT_Y - 30); ctx.fillStyle = '#9aa0ac'; rrect(x - 9, COUNTER_Y - 4, 18, 5, 2); ctx.fill(); ctx.fillStyle = '#8a8f9c'; }
   ctx.fillStyle = 'rgba(60,60,70,.2)'; ctx.fillRect(0, BELT_Y + 30, W, 5);
   ctx.fillStyle = lin(0, BELT_Y + 10, 0, BELT_Y + 30, [[0, '#c3c8d2'], [1, '#8a8f9c']]); rrect(-10, BELT_Y + 9, W + 20, 21, 6); ctx.fill();
   for (let x = 14; x < W; x += 34) { ell(x, BELT_Y + 20, 6.5, 6.5, '#e3e6ec'); ell(x, BELT_Y + 20, 4, 4, '#a3a8b4'); ctx.strokeStyle = '#6a6f7a'; ctx.lineWidth = 1.2; const a = beltX / 6.5; ctx.beginPath(); ctx.moveTo(x + Math.cos(a) * 3.5, BELT_Y + 20 + Math.sin(a) * 3.5); ctx.lineTo(x - Math.cos(a) * 3.5, BELT_Y + 20 - Math.sin(a) * 3.5); ctx.stroke(); }
@@ -259,45 +262,49 @@ function drawFactory() {
 }
 
 function drawWindow() {
-  // The scanner arch over the belt; a beam while the front cupcake is inside.
-  const f = front(), inside = f && f.x > WIN_L && f.x < WIN_R && state === 'play';
-  const fl = T - flash.t < .35, lamp = !fl ? (inside ? '#7fd6ff' : '#ffd166') : flash.ok ? '#5fc282' : '#ff5a5a';
+  // Behind the cupcakes: the scanner's back panel and, while one is inside, its beam.
+  const f = front(), inside = f && f.x > WIN_L && f.x < WIN_R && state === 'play', fl = T - flash.t < .35;
+  ctx.fillStyle = 'rgba(255,255,255,.35)'; rrect(WIN_L + 3, ARCH_TOP + 20, WIN_R - WIN_L - 6, BELT_Y - ARCH_TOP - 20, 4); ctx.fill();
   if (inside || fl) {
     const col = fl ? (flash.ok ? '95,194,130' : '255,90,90') : '127,214,255';
-    ctx.fillStyle = lin(0, 300, 0, BELT_Y, [[0, `rgba(${col},.32)`], [1, `rgba(${col},.06)`]]);
-    ctx.beginPath(); ctx.moveTo(WIN_L + 8, 300); ctx.lineTo(WIN_R - 8, 300); ctx.lineTo(WIN_R - 2, BELT_Y); ctx.lineTo(WIN_L + 2, BELT_Y); ctx.closePath(); ctx.fill();
-    if (inside && !fl) { const sy = 302 + ((T * 70) % (BELT_Y - 304)); ctx.fillStyle = 'rgba(160,230,255,.8)'; ctx.fillRect(WIN_L + 6, sy, WIN_R - WIN_L - 12, 2); }
+    ctx.fillStyle = lin(0, ARCH_TOP + 20, 0, BELT_Y, [[0, `rgba(${col},.34)`], [1, `rgba(${col},.06)`]]);
+    ctx.beginPath(); ctx.moveTo(WIN_L + 10, ARCH_TOP + 20); ctx.lineTo(WIN_R - 10, ARCH_TOP + 20); ctx.lineTo(WIN_R - 3, BELT_Y); ctx.lineTo(WIN_L + 3, BELT_Y); ctx.closePath(); ctx.fill();
   }
 }
 function drawScannerFront() {
+  // In front: the pillars, the beam with its label, the lamp, and the scan line.
   const fl = T - flash.t < .35, f = front(), inside = f && f.x > WIN_L && f.x < WIN_R && state === 'play';
   const lamp = !fl ? (inside ? '#7fd6ff' : '#ffd166') : flash.ok ? '#5fc282' : '#ff5a5a';
+  if (inside && !fl) { const sy = ARCH_TOP + 24 + ((T * 80) % (BELT_Y - ARCH_TOP - 28)); ctx.fillStyle = 'rgba(160,230,255,.75)'; ctx.fillRect(WIN_L + 6, sy, WIN_R - WIN_L - 12, 2); }
   for (const x of [WIN_L - 4, WIN_R + 4]) {
-    ctx.fillStyle = lin(x - 7, 0, x + 7, 0, [[0, '#9aa0ac'], [.5, '#e3e6ec'], [1, '#8a8f9c']]); rrect(x - 7, 296, 14, BELT_Y - 296 + 2, 4); ctx.fill();
-    ell(x, 318, 2.5, 2.5, '#6a6f7a'); ell(x, BELT_Y - 14, 2.5, 2.5, '#6a6f7a');
+    ctx.fillStyle = lin(x - 7, 0, x + 7, 0, [[0, '#9aa0ac'], [.5, '#e3e6ec'], [1, '#8a8f9c']]); rrect(x - 7, ARCH_TOP + 10, 14, BELT_Y - ARCH_TOP - 8, 4); ctx.fill();
+    ell(x, ARCH_TOP + 34, 2.5, 2.5, '#6a6f7a'); ell(x, BELT_Y - 12, 2.5, 2.5, '#6a6f7a');
   }
-  ctx.fillStyle = 'rgba(60,60,70,.2)'; rrect(WIN_L - 14, 286, WIN_R - WIN_L + 28, 22, 9); ctx.fill();
-  ctx.fillStyle = lin(0, 278, 0, 300, [[0, '#ffb3c7'], [1, '#f2849f']]); rrect(WIN_L - 14, 278, WIN_R - WIN_L + 28, 22, 9); ctx.fill();
-  ctx.fillStyle = '#fff'; ctx.font = '900 11px "Trebuchet MS", system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.fillText('C H E C K', 180, 293);
-  ctx.fillStyle = '#6a6f7a'; rrect(168, 266, 24, 13, 5); ctx.fill();
-  ell(180, 268, 9, 7, lamp); ell(177, 266, 3, 2, 'rgba(255,255,255,.75)');
-  if (inside || fl) { ctx.fillStyle = `${lamp}44`; ctx.beginPath(); ctx.arc(180, 268, 16, 0, TAU); ctx.fill(); }
+  ctx.fillStyle = 'rgba(60,60,70,.2)'; rrect(WIN_L - 16, ARCH_TOP + 6, WIN_R - WIN_L + 32, 24, 10); ctx.fill();
+  ctx.fillStyle = lin(0, ARCH_TOP, 0, ARCH_TOP + 24, [[0, '#ffb3c7'], [1, '#f2849f']]); rrect(WIN_L - 16, ARCH_TOP, WIN_R - WIN_L + 32, 24, 10); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.font = '900 11px "Trebuchet MS", system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.fillText('C H E C K', 180, ARCH_TOP + 16);
+  ctx.fillStyle = '#6a6f7a'; rrect(168, ARCH_TOP - 11, 24, 12, 5); ctx.fill();
+  if (inside || fl) { ctx.fillStyle = `${lamp}44`; ctx.beginPath(); ctx.arc(180, ARCH_TOP - 10, 15, 0, TAU); ctx.fill(); }
+  ell(180, ARCH_TOP - 10, 8, 6.5, lamp); ell(177.5, ARCH_TOP - 12, 2.6, 1.8, 'rgba(255,255,255,.75)');
 }
 function drawMachine() {
-  // The machine the cupcakes come out of, at the start of the belt.
-  const t0 = BELT_Y - 96;
-  ctx.fillStyle = 'rgba(60,40,30,.18)'; rrect(-14, t0 + 8, 74, 98, 14); ctx.fill();
-  ctx.fillStyle = lin(0, t0, 0, t0 + 104, [[0, '#a9e0d0'], [1, '#7cc8b2']]); rrect(-14, t0, 70, 104, 14); ctx.fill();
-  ctx.fillStyle = '#5fae98'; rrect(-14, t0, 70, 16, 10); ctx.fill();
-  ell(18, t0 + 44, 17, 17, '#4f8f7e'); ell(18, t0 + 44, 13, 13, lin(0, t0 + 31, 0, t0 + 57, [[0, '#ffe2a6'], [1, '#ffb45a']]));
-  ell(13, t0 + 39, 4, 3, 'rgba(255,255,255,.6)');
-  ctx.fillStyle = '#3a3e48'; rrect(30, t0 + 66, 26, 32, 4); ctx.fill();
-  for (let k = 0; k < 3; k++) ell(-2 + k * 10, t0 + 8, 3, 3, ['#ff8fa8', '#ffd166', '#8fd3a8'][k]);
+  // The machine the cupcakes come out of: taller than a cupcake, with a dark outlet.
+  const t0 = BELT_Y - 138, w = 72;
+  ctx.fillStyle = 'rgba(60,40,30,.18)'; rrect(-12, t0 + 8, w + 4, 140, 14); ctx.fill();
+  ctx.fillStyle = lin(0, t0, 0, BELT_Y + 6, [[0, '#a9e0d0'], [1, '#7cc8b2']]); rrect(-14, t0, w, 144, 14); ctx.fill();
+  ctx.fillStyle = '#5fae98'; rrect(-14, t0, w, 18, 12); ctx.fill();
+  for (let k = 0; k < 3; k++) ell(0 + k * 11, t0 + 9, 3, 3, ['#ff8fa8', '#ffd166', '#8fd3a8'][k]);
+  ell(20, t0 + 48, 18, 18, '#4f8f7e'); ell(20, t0 + 48, 14, 14, lin(0, t0 + 34, 0, t0 + 62, [[0, '#ffe2a6'], [1, '#ffb45a']]));
+  ell(15, t0 + 43, 4.5, 3, 'rgba(255,255,255,.6)');
+  ctx.fillStyle = '#4f8f7e'; rrect(4, t0 + 78, 32, 8, 4); ctx.fill();
+  // The outlet the belt runs out of.
+  ctx.fillStyle = '#2f3440'; rrect(w - 28, BELT_Y - 98, 16, 98, 6); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,.12)'; ctx.fillRect(w - 26, BELT_Y - 96, 3, 94);
 }
 
 function drawBinAndBox() {
   // The bin (left) and the cake box (right), standing on the counter.
-  const [bx] = BIN, top = COUNTER_Y - 52;
+  const [bx] = BIN, top = COUNTER_Y - 50;
   ell(bx, COUNTER_Y + 1, 38, 6, 'rgba(60,40,30,.22)');
   ctx.fillStyle = lin(bx - 32, 0, bx + 32, 0, [[0, '#8a8f9c'], [.45, '#e3e6ec'], [1, '#7a808c']]);
   ctx.beginPath(); ctx.moveTo(bx - 32, top + 10); ctx.lineTo(bx + 32, top + 10); ctx.lineTo(bx + 27, COUNTER_Y); ctx.lineTo(bx - 27, COUNTER_Y); ctx.closePath(); ctx.fill();
@@ -323,7 +330,8 @@ function drawBelt() {
   if (f && state === 'play') {
     // An arrow over the cupcake to check next.
     const bob = Math.sin(T * 6) * 2.5;
-    ctx.fillStyle = '#ff8c2a'; ctx.beginPath(); ctx.moveTo(f.x - 7, BELT_Y - 112 + bob); ctx.lineTo(f.x + 7, BELT_Y - 112 + bob); ctx.lineTo(f.x, BELT_Y - 102 + bob); ctx.closePath(); ctx.fill();
+    const ay = f.x > WIN_L - 20 && f.x < WIN_R + 20 ? ARCH_TOP + 36 : BELT_Y - 100;
+    ctx.fillStyle = '#ff8c2a'; ctx.beginPath(); ctx.moveTo(f.x - 7, ay + bob); ctx.lineTo(f.x + 7, ay + bob); ctx.lineTo(f.x, ay + 10 + bob); ctx.closePath(); ctx.fill();
   }
 }
 function drawFlying() {
@@ -384,11 +392,11 @@ function drawBanner() {
   if (state !== 'play' || s > ORDER_PAUSE) return;
   const a = Math.min(1, s * 6, (ORDER_PAUSE - s) * 4);
   ctx.globalAlpha = a;
-  ctx.fillStyle = 'rgba(255,253,246,.96)'; rrect(70, 218, 220, 70, 20); ctx.fill();
+  ctx.fillStyle = 'rgba(255,253,246,.96)'; rrect(70, 206, 220, 70, 20); ctx.fill();
   ctx.strokeStyle = '#ff9a2a'; ctx.lineWidth = 2.5; ctx.stroke();
   ctx.fillStyle = '#e8584a'; ctx.font = '900 22px "Trebuchet MS", system-ui, sans-serif'; ctx.textAlign = 'center';
-  ctx.fillText(orderNo === 1 ? 'First order!' : 'New order!', 180, 250);
-  ctx.fillStyle = '#7a5a40'; ctx.font = '600 12px system-ui, sans-serif'; ctx.fillText('Read the ticket above.', 180, 272);
+  ctx.fillText(orderNo === 1 ? 'First order!' : 'New order!', 180, 238);
+  ctx.fillStyle = '#7a5a40'; ctx.font = '600 12px system-ui, sans-serif'; ctx.fillText('Read the ticket above.', 180, 260);
   ctx.globalAlpha = 1;
 }
 
@@ -459,15 +467,15 @@ function frame(now) {
   if (orderNo !== lastOrder) { lastOrder = orderNo; if (state === 'play') sOrder(); }
   ctx.setTransform(dpr * scale, 0, 0, dpr * scale, 0, 0);
   drawFactory(); drawWindow(); drawBelt(); drawScannerFront(); drawMachine(); drawBinAndBox(); drawFlying(); if (order) drawCard(); drawBanner(); drawHud(); drawPanel();
-  if (state === 'intro') card('Cupcake Check', ['Cupcakes roll through the check window.', 'The order card says which ones to TOSS.', 'Box all the others!', 'Toss = left button, Box = right button.', 'A new order every 10 cupcakes. Three hearts.'], "Let's go", 'draft 2  ·  sound on', 150);
+  if (state === 'intro') card('Cupcake Check', ['Cupcakes roll through the check window.', 'The order card says which ones to TOSS.', 'Box all the others!', 'Toss = left button, Box = right button.', 'A new order every 10 cupcakes. Three hearts.'], "Let's go", 'draft 3  ·  sound on', 150);
   if (state === 'over') card('No hearts left!', [why, `Cupcakes sorted right: ${score}`, score >= best && score > 0 ? 'A new best!' : `Best: ${best}`], 'Play again', '', 170);
   requestAnimationFrame(frame);
 }
 
 // ---------- tests and screenshots
-function autoPlay() { const f = front(); if (f && f.x > WIN_L - 10 && !paused()) sort(shouldToss(order, f)); }
+function autoPlay(at = WIN_L - 10) { const f = front(); if (f && f.x > at && !paused()) sort(shouldToss(order, f)); }
 if (!order) { order = makeOrder(1); orderNo = 1; }
-if (Q.get('t')) { startRun(); const until = Number(Q.get('t')); lives = 99; while (el < until) { autoPlay(); update(1 / 60); T += 1 / 60; } lives = Math.min(lives, LIVES); }
+if (Q.get('t')) { startRun(); const until = Number(Q.get('t')); lives = 99; while (el < until) { autoPlay(Q.has('mid') ? 200 : WIN_L - 10); update(1 / 60); T += 1 / 60; } lives = Math.min(lives, LIVES); }
 if (Q.has('over')) { state = 'over'; score = 31; best = 40; why = 'Toss it: it has pink frosting and no topping.'; }
 window.__cc = { startRun, update, sort, front, autoPlay, makeOrder, makeItem, shouldToss, reason, orderText, condHolds, speed, FEATURES,
   get state() { return state; }, get lives() { return lives; }, set lives(v) { lives = v; }, get score() { return score; }, get order() { return order; },
