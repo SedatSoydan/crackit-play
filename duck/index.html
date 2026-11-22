@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Odd Duck</title>
+<style>
+html,body{margin:0;height:100%;background:#e6f5fc;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none}
+canvas{display:block;margin:0 auto}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Odd Duck, draft 1: rubber ducks all move the same way, except one. Tap it.
+const W = 360, H = 640, BX = 16, BY = 128, BS = 328, RUN = 60, PENALTY = 3, HINT_AFTER = 7, BEAT = 1.6;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let scale = 1, dpr = 1;
+function resize() {
+  dpr = window.devicePixelRatio || 1;
+  scale = Math.min(innerWidth / W, innerHeight / H);
+  cv.style.width = W * scale + 'px'; cv.style.height = H * scale + 'px';
+  cv.width = Math.round(W * scale * dpr); cv.height = Math.round(H * scale * dpr);
+}
+addEventListener('resize', resize); resize();
+
+function mulberry(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+let rnd = mulberry((Date.now() % 1e9) | 0);
+
+// ---------- motions: pose(t, lag, k) gives one duck's look at time t.
+// lag is how far behind the beat the duck is (seconds); k a speed factor;
+// dir is 1 or -1 for spins and circles.
+const TAU = Math.PI * 2;
+function blank() { return { dx: 0, dy: 0, rot: 0, sc: 1, col: 0, eye: 0, face: 1 }; }
+const MOTIONS = [
+  { id: 'bob', tier: 1, text: 'This duck bobbed out of step.', kind: 'lag',
+    pose: (p, t) => { p.dy -= 9 * Math.abs(Math.sin(Math.PI * t / BEAT)); } },
+  { id: 'spin', tier: 1, text: 'This duck spun the other way.', kind: 'dir',
+    pose: (p, t, dir) => { p.rot += dir * TAU * t / (BEAT * 2); } },
+  { id: 'swim', tier: 1, text: 'This duck swam round the other way.', kind: 'dir',
+    pose: (p, t, dir) => { const a = dir * TAU * t / (BEAT * 2); p.dx += 10 * Math.cos(a); p.dy += 5 * Math.sin(a); p.face = Math.sin(a) * dir > 0 ? -1 : 1; } },
+  { id: 'hop', tier: 1, text: 'This duck hopped out of step.', kind: 'lag',
+    pose: (p, t) => { const u = ((t / BEAT) % 1 + 1) % 1; if (u < .35) p.dy -= 16 * Math.sin(Math.PI * u / .35); } },
+  { id: 'rock', tier: 2, text: 'This duck rocked out of step.', kind: 'lag',
+    pose: (p, t) => { p.rot += .38 * Math.sin(TAU * t / BEAT); } },
+  { id: 'blink', tier: 2, text: 'This duck blinked at the wrong time.', kind: 'lag',
+    pose: (p, t) => { const u = ((t / BEAT) % 1 + 1) % 1; if (u < .14) p.eye = 1; } },
+  { id: 'colour', tier: 2, text: 'This duck changed colour out of step.', kind: 'lag',
+    pose: (p, t) => { p.col = .5 + .5 * Math.sin(TAU * t / (BEAT * 2)); } },
+  { id: 'grow', tier: 2, text: 'This duck grew and shrank out of step.', kind: 'lag',
+    pose: (p, t) => { p.sc *= 1 + .14 * Math.sin(TAU * t / BEAT); } },
+  { id: 'look', tier: 2, text: 'This duck looked the other way.', kind: 'lag', span: 1,
+    pose: (p, t) => { p.face = Math.sin(TAU * t / (BEAT * 2)) >= 0 ? 1 : -1; } },
+  { id: 'fast', tier: 3, text: 'This duck bobbed faster.', kind: 'speed',
+    pose: (p, t) => { p.dy -= 9 * Math.abs(Math.sin(Math.PI * t / BEAT)); } },
+  { id: 'slow', tier: 3, text: 'This duck bobbed slower.', kind: 'slow',
+    pose: (p, t) => { p.dy -= 9 * Math.abs(Math.sin(Math.PI * t / BEAT)); } },
+];
+const byId = id => MOTIONS.find(m => m.id === id);
+// Tier 3 also makes pairs: two motions at once, the odd duck off in one.
+const PAIRS = [['bob', 'blink'], ['spin', 'colour'], ['swim', 'blink'], ['hop', 'colour'], ['rock', 'blink'], ['grow', 'look'], ['bob', 'look'], ['rock', 'colour']];
+
+// How different the odd duck is: 1 at round 1, down to a fair floor.
+function strength(n) { return Math.max(.3, 1 - (n - 1) * .055); }
+function gridFor(n) { return n <= 3 ? 3 : n <= 8 ? 4 : 5; }
+function tiersFor(n) { return n <= 3 ? [1] : n <= 8 ? [1, 2] : [1, 2, 3]; }
+
+// A round: {n, size, odd, parts: [{m, oddLag, oddDir, oddK}], offIn, text}
+let lastKey = '';
+function makeRound(n, force) {
+  const tiers = tiersFor(n), top = tiers[tiers.length - 1], d = strength(n);
+  let choice;
+  if (force) choice = force.includes('+') ? force.split('+') : [force];
+  else {
+    let pool = MOTIONS.filter(m => tiers.includes(m.tier)).map(m => [m.id]);
+    if (top === 3) pool = pool.concat(PAIRS);
+    pool = pool.filter(c => c.join('+') !== lastKey);
+    if (top > 1 && rnd() < .6) {
+      const fresh = pool.filter(c => c.length === 2 ? top === 3 : byId(c[0]).tier === top);
+      if (fresh.length) pool = fresh;
+    }
+    choice = pool[Math.floor(rnd() * pool.length)];
+  }
+  lastKey = choice.join('+');
+  const off = Math.floor(rnd() * choice.length);
+  const parts = choice.map((id, i) => {
+    const m = byId(id), isOff = i === off;
+    return { m, lag: isOff && m.kind === 'lag' ? BEAT * (m.span || .5) * d : 0, dir: isOff && m.kind === 'dir' ? -1 : 1,
+      k: isOff ? (m.kind === 'speed' ? 1 + .55 * d : m.kind === 'slow' ? 1 - .35 * d : 1) : 1 };
+  });
+  const size = gridFor(n);
+  return { n, size, odd: Math.floor(rnd() * size * size), parts, text: byId(choice[off]).text, t0: 0 };
+}
+
+function poseOf(round, i, t) {
+  const p = blank();
+  for (const part of round.parts) {
+    const isOdd = i === round.odd;
+    const lag = isOdd ? part.lag : 0, dir = isOdd ? part.dir : 1, k = isOdd ? part.k : 1;
+    part.m.pose(p, (t - lag) * k, dir);
+  }
+  return p;
+}
+
+// ---------- drawing
+function cellRect(round, i) {
+  const n = round.size, cs = BS / n;
+  return { x: BX + (i % n) * cs, y: BY + Math.floor(i / n) * cs, cs };
+}
+function mix(a, b, u) { const A = hex(a), B = hex(b); return `rgb(${A.map((v, i) => Math.round(v + (B[i] - v) * u)).join(',')})`; }
+function hex(c) { c = c.replace('#', ''); return [0, 2, 4].map(i => parseInt(c.slice(i, i + 2), 16)); }
+
+function drawDuck(x, y, s, p, extra) {
+  ctx.save();
+  ctx.translate(x + p.dx * s, y + p.dy * s);
+  ctx.rotate(p.rot + (extra.shake || 0));
+  ctx.scale(s * p.sc * p.face, s * p.sc);
+  const body = mix('#ffd23f', '#ff8f4a', p.col), shade = mix('#f2b200', '#e0602a', p.col);
+  // Body, tail, wing.
+  ctx.fillStyle = body;
+  ctx.beginPath(); ctx.moveTo(-20, 0); ctx.lineTo(-27, -11); ctx.lineTo(-12, -4); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(-1, 5, 21, 13, 0, 0, TAU); ctx.fill();
+  ctx.fillStyle = shade; ctx.beginPath(); ctx.ellipse(-1, 12, 18, 6, 0, 0, Math.PI); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(-4, 5, 10, 6.5, -.2, 0, TAU); ctx.fill();
+  // Head, beak, eye, cheek.
+  ctx.fillStyle = body; ctx.beginPath(); ctx.arc(9, -10, 10.5, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#ff8c2a'; ctx.beginPath(); ctx.ellipse(19.5, -7.5, 6.5, 3.6, .12, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#e4691a'; ctx.beginPath(); ctx.ellipse(19, -5.6, 5, 1.6, .12, 0, Math.PI); ctx.fill();
+  if (p.eye > .5) { ctx.strokeStyle = '#3a2418'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(12, -13, 2.3, .2, Math.PI - .2); ctx.stroke(); }
+  else { ctx.fillStyle = '#2a1a12'; ctx.beginPath(); ctx.arc(12, -12.5, 2.5, 0, TAU); ctx.fill(); ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(12.8, -13.4, .9, 0, TAU); ctx.fill(); }
+  ctx.fillStyle = 'rgba(255,120,120,.45)'; ctx.beginPath(); ctx.arc(10, -6, 2.6, 0, TAU); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,.45)'; ctx.beginPath(); ctx.ellipse(3, -16, 4, 2, -.4, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+
+function drawBoard(t) {
+  // Bath tiles.
+  ctx.fillStyle = '#bfe3f4'; rrect(BX - 6, BY - 6, BS + 12, BS + 12, 18); ctx.fill();
+  const n = round.size, cs = BS / n;
+  for (let i = 0; i < n * n; i++) {
+    const r = cellRect(round, i);
+    ctx.fillStyle = (i + Math.floor(i / n)) % 2 ? '#e3f4fc' : '#d6eef9';
+    rrect(r.x + 2, r.y + 2, cs - 4, cs - 4, 10); ctx.fill();
+  }
+  const s = cs / 64, rt = t - round.t0;
+  for (let i = 0; i < n * n; i++) {
+    const r = cellRect(round, i), cx = r.x + cs / 2, cy = r.y + cs / 2 + 4 * s;
+    const p = poseOf(round, i, rt);
+    // Pop in at the start of a round.
+    const pop = Math.min(1, rt / .25), popS = pop < 1 ? .6 + .4 * Math.sin(pop * Math.PI / 2) * 1.1 : 1;
+    p.sc *= popS;
+    // Water ring.
+    ctx.fillStyle = 'rgba(120,190,230,.35)'; ctx.beginPath(); ctx.ellipse(cx + p.dx * s, cy + 14 * s, 22 * s, 5 * s, 0, 0, TAU); ctx.fill();
+    // The hint: ripples from the odd duck when it is not found for a while.
+    if (i === round.odd && state === 'play' && rt > HINT_AFTER) {
+      const h = Math.min(1, (rt - HINT_AFTER) / 8);
+      for (let j = 0; j < 2; j++) {
+        const u = ((rt * (.7 + h * .6) + j * .5) % 1);
+        ctx.strokeStyle = `rgba(80,160,220,${(1 - u) * (.25 + .5 * h)})`; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.ellipse(cx, cy + 14 * s, (16 + u * 26) * s, (4 + u * 7) * s, 0, 0, TAU); ctx.stroke();
+      }
+    }
+    const shake = shakes[i] ? Math.sin((t - shakes[i]) * 40) * .25 * Math.max(0, 1 - (t - shakes[i]) / .4) : 0;
+    drawDuck(cx, cy, s, p, { shake });
+  }
+  // Sparkles on a found duck.
+  for (const sp of sparks) {
+    const u = (t - sp.t) / .6; if (u > 1) continue;
+    for (let j = 0; j < 8; j++) {
+      const a = j / 8 * TAU, r = 10 + u * 34;
+      ctx.fillStyle = `rgba(255,200,60,${1 - u})`; star(sp.x + Math.cos(a) * r, sp.y + Math.sin(a) * r, 4 * (1 - u) + 1); ctx.fill();
+    }
+  }
+}
+
+function star(x, y, r) { ctx.beginPath(); for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, q = i % 2 ? r * .45 : r; ctx.lineTo(x + Math.cos(a) * q, y + Math.sin(a) * q); } ctx.closePath(); }
+function rrect(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+
+// ---------- sound
+let AC = null, master = null;
+function audio() {
+  if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+  try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return; }
+  master = AC.createGain(); master.gain.value = .6; master.connect(AC.destination);
+}
+function tone(f, when, dur, vol, type = 'sine', to = 0, filter = 0) {
+  if (!AC) return;
+  const o = AC.createOscillator(), g = AC.createGain(); o.type = type; o.frequency.setValueAtTime(f, when);
+  if (to) o.frequency.exponentialRampToValueAtTime(to, when + dur);
+  g.gain.setValueAtTime(0, when); g.gain.linearRampToValueAtTime(vol, when + .015); g.gain.exponentialRampToValueAtTime(.0005, when + dur);
+  if (filter) { const b = AC.createBiquadFilter(); b.type = 'bandpass'; b.frequency.value = filter; b.Q.value = 3; o.connect(b); b.connect(g); } else o.connect(g);
+  g.connect(master); o.start(when); o.stop(when + dur + .05);
+}
+function sQuack() { if (!AC) return; const t = AC.currentTime; tone(520, t, .12, .5, 'sawtooth', 380, 1100); tone(500, t + .14, .14, .45, 'sawtooth', 340, 1000); tone(1047, t + .05, .3, .05); }
+function sBoop() { if (!AC) return; tone(330, AC.currentTime, .25, .12, 'triangle', 200); }
+function sTick() { if (!AC) return; tone(1200, AC.currentTime, .04, .04); }
+function sEnd() { if (!AC) return; const t = AC.currentTime; [784, 659, 523].forEach((f, i) => tone(f, t + i * .14, .4, .08, 'triangle')); }
+function sClick() { if (!AC) return; tone(880, AC.currentTime, .04, .05, 'triangle'); }
+
+// ---------- game
+let state = 'intro', T = 0, left = RUN, score = 0, roundNo = 1, round = makeRound(1), busyUntil = 0, lastWhole = RUN, flash = -9;
+let shakes = {}, sparks = [], best = 0;
+try { best = Number(localStorage.getItem('oddduck_best') || 0); } catch (e) { /* storage off */ }
+
+function startRun() {
+  state = 'play'; left = RUN; score = 0; roundNo = 1; lastKey = ''; shakes = {}; sparks = [];
+  round = makeRound(1); round.t0 = T; busyUntil = 0;
+}
+function nextRound() { roundNo++; round = makeRound(roundNo); round.t0 = T; shakes = {}; }
+function tapCell(i) {
+  if (state !== 'play' || T < busyUntil) return;
+  audio();
+  if (i === round.odd) {
+    score++; sQuack();
+    const r = cellRect(round, i); sparks.push({ x: r.x + r.cs / 2, y: r.y + r.cs / 2, t: T });
+    busyUntil = T + .45; setTimeout(() => { if (state === 'play') nextRound(); }, 450);
+  } else {
+    shakes[i] = T; left = Math.max(0, left - PENALTY); flash = T; sBoop();
+  }
+}
+function endRun() {
+  state = 'over'; sEnd();
+  if (score > best) { best = score; try { localStorage.setItem('oddduck_best', String(best)); } catch (e) { /* storage off */ } }
+}
+
+function pagePos(e) { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) / scale, (e.clientY - r.top) / scale]; }
+const BTN = [80, 0, 200, 56];
+let btnY = 0;
+cv.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  const [x, y] = pagePos(e);
+  if (state === 'intro' || state === 'over') {
+    if (x >= BTN[0] && x <= BTN[0] + BTN[2] && y >= btnY && y <= btnY + BTN[3]) { audio(); sClick(); startRun(); }
+    return;
+  }
+  if (x < BX || x > BX + BS || y < BY || y > BY + BS) return;
+  const n = round.size, cs = BS / n;
+  tapCell(Math.floor((y - BY) / cs) * n + Math.floor((x - BX) / cs));
+});
+addEventListener('keydown', e => { if ((state === 'intro' || state === 'over') && (e.key === 'Enter' || e.key === ' ')) { audio(); startRun(); } });
+
+function button(x, y, w, h, label) {
+  ctx.fillStyle = '#3f9e62'; rrect(x, y + 5, w, h, 26); ctx.fill();
+  ctx.fillStyle = '#5fc282'; rrect(x, y, w, h, 26); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,.22)'; rrect(x + 5, y + 4, w - 10, h * .4, 20); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.font = '700 20px "Trebuchet MS", system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(label, x + w / 2, y + h / 2 + 1); ctx.textBaseline = 'alphabetic';
+}
+
+function drawHud() {
+  ctx.fillStyle = '#ff8c2a'; ctx.font = '700 13px "Trebuchet MS", system-ui, sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('O D D   D U C K', 180, 26);
+  ctx.fillStyle = '#2f6f99'; ctx.font = '700 34px "Trebuchet MS", system-ui, sans-serif'; ctx.fillText(String(score), 180, 66);
+  // Time bar.
+  const u = Math.max(0, left / RUN), bx = 30, bw = 300, by = 84;
+  ctx.fillStyle = '#cfe6f2'; rrect(bx, by, bw, 14, 7); ctx.fill();
+  ctx.fillStyle = T - flash < .35 ? '#ff6f5a' : u > .3 ? '#5fc282' : '#ffa53a'; rrect(bx, by, Math.max(14, bw * u), 14, 7); ctx.fill();
+  ctx.fillStyle = '#7fa6bf'; ctx.font = '11px system-ui, sans-serif'; ctx.fillText(state === 'play' ? `${Math.ceil(left)} s` : '', 180, 116);
+}
+
+function card(title, lines, btn, note, y0) {
+  ctx.font = '14px system-ui, sans-serif';
+  let h = 70 + lines.length * 22 + 80 + (note ? 20 : 0);
+  ctx.fillStyle = 'rgba(40,90,130,.18)'; rrect(26, y0 + 8, 308, h, 26); ctx.fill();
+  ctx.fillStyle = '#fffdf6'; rrect(26, y0, 308, h, 26); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,140,42,.5)'; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.textAlign = 'center'; ctx.fillStyle = '#ff8c2a'; ctx.font = '700 28px "Trebuchet MS", system-ui, sans-serif'; ctx.fillText(title, 180, y0 + 44);
+  ctx.fillStyle = '#4a5a6a'; ctx.font = '14px system-ui, sans-serif';
+  lines.forEach((l, i) => ctx.fillText(l, 180, y0 + 76 + i * 22));
+  btnY = y0 + 76 + lines.length * 22;
+  button(BTN[0], btnY, BTN[2], BTN[3], btn);
+  if (note) { ctx.fillStyle = '#9ab0c0'; ctx.font = '11px system-ui, sans-serif'; ctx.fillText(note, 180, btnY + 80); }
+}
+
+// The end card sits under the board, so the circled duck stays in view.
+function overCard() {
+  const y0 = 476;
+  ctx.fillStyle = 'rgba(40,90,130,.18)'; rrect(26, y0 + 6, 308, 150, 24); ctx.fill();
+  ctx.fillStyle = '#fffdf6'; rrect(26, y0, 308, 150, 24); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,140,42,.5)'; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#ff8c2a'; ctx.font = '700 21px "Trebuchet MS", system-ui, sans-serif'; ctx.fillText("Time's up!", 180, y0 + 29);
+  ctx.fillStyle = '#4a5a6a'; ctx.font = '600 13.5px system-ui, sans-serif'; ctx.fillText(round.text, 180, y0 + 52);
+  ctx.fillStyle = '#7a8a9a'; ctx.font = '13px system-ui, sans-serif';
+  ctx.fillText(`Ducks found: ${score}   ·   ` + (score >= best && score > 0 ? 'a new best!' : `best ${best}`), 180, y0 + 73);
+  btnY = y0 + 86;
+  button(BTN[0], btnY, BTN[2], 50, 'Play again');
+}
+
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(.05, (now - last) / 1000); last = now; T += dt;
+  if (state === 'play') {
+    left -= dt;
+    const whole = Math.ceil(left);
+    if (whole !== lastWhole && left < 5 && left > 0) sTick();
+    lastWhole = whole;
+    if (left <= 0) { left = 0; endRun(); }
+  }
+  ctx.setTransform(dpr * scale, 0, 0, dpr * scale, 0, 0);
+  const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#f2fbff'); g.addColorStop(1, '#d9f0fb');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // Bubbles.
+  for (let i = 0; i < 12; i++) {
+    const x = (i * 61 + Math.sin(T * .5 + i) * 10) % W, y = H - ((T * (10 + i * 2) + i * 97) % (H + 40));
+    ctx.strokeStyle = 'rgba(120,190,230,.35)'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(x, y, 3 + i % 4, 0, TAU); ctx.stroke();
+  }
+  drawHud();
+  drawBoard(T);
+  if (state === 'play') {
+    ctx.fillStyle = '#5a7a90'; ctx.font = '600 15px "Trebuchet MS", system-ui, sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('Tap the duck that moves differently.', 180, 500);
+    ctx.fillStyle = '#9ab0c0'; ctx.font = '11px system-ui, sans-serif';
+    ctx.fillText(`round ${roundNo}  ·  best ${best}  ·  a wrong tap costs ${PENALTY} s`, 180, 522);
+  }
+  if (state === 'over') {
+    // Circle the duck that was odd, and say why.
+    const r = cellRect(round, round.odd), a = .6 + .4 * Math.sin(T * 5);
+    ctx.strokeStyle = `rgba(255,140,42,${a})`; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(r.x + r.cs / 2, r.y + r.cs / 2, r.cs * .5, 0, TAU); ctx.stroke();
+    overCard();
+  }
+  if (state === 'intro') {
+    ctx.fillStyle = 'rgba(230,245,252,.75)'; ctx.fillRect(0, 0, W, H);
+    card('Odd Duck', ['All the ducks move the same way,', 'except one. Tap the odd duck!', '', 'You have 60 seconds.', 'A wrong tap costs 3 seconds.'], "Let's go", 'draft 1  ·  sound on', 170);
+  }
+  requestAnimationFrame(frame);
+}
+
+// ---------- test and screenshot hooks
+const Q = new URLSearchParams(location.search);
+if (Q.get('round')) { state = 'play'; roundNo = Number(Q.get('round')); round = makeRound(roundNo, Q.get('m') || null); round.t0 = 0; }
+if (Q.get('t')) T = Number(Q.get('t'));
+if (Q.has('over')) { state = 'over'; score = 14; best = 17; }
+window.__od = { MOTIONS, PAIRS, makeRound, poseOf, strength, gridFor, tiersFor, tapCell, startRun,
+  get round() { return round; }, get score() { return score; }, get left() { return left; }, get state() { return state; }, setRnd: f => rnd = f };
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
