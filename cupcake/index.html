@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Cupcake Check</title>
+<style>
+html,body{margin:0;height:100%;background:#fff4ea;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none}
+canvas{display:block;margin:0 auto}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Cupcake Check, draft 1: cupcakes roll through a check window. Toss the ones
+// the order names, box the rest. A new order every 10 cupcakes.
+const W = 360, H = 640, LIVES = 3, PER_ORDER = 10, SPACING = 118, BELT_Y = 352, WIN_L = 128, WIN_R = 232, SPAWN_X = -40;
+const BIN = [62, 468], BOX = [298, 468], ORDER_PAUSE = 1.8;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let scale = 1, dpr = 1;
+function resize() {
+  dpr = window.devicePixelRatio || 1;
+  scale = Math.min(innerWidth / W, innerHeight / H);
+  cv.style.width = W * scale + 'px'; cv.style.height = H * scale + 'px';
+  cv.width = Math.round(W * scale * dpr); cv.height = Math.round(H * scale * dpr);
+}
+addEventListener('resize', resize); resize();
+function mulberry(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const Q = new URLSearchParams(location.search);
+let rnd = mulberry(Q.get('seed') ? Number(Q.get('seed')) : (Date.now() % 1e9) | 0);
+const TAU = Math.PI * 2;
+const pick = a => a[Math.floor(rnd() * a.length)];
+
+// ---------- rules
+const FEATURES = { frost: ['pink', 'blue', 'white', 'choc'], top: ['cherry', 'star', 'none'], spr: ['yes', 'no'] };
+const LABEL = { frost: { pink: 'pink frosting', blue: 'blue frosting', white: 'white frosting', choc: 'chocolate' },
+  top: { cherry: 'a cherry', star: 'a star', none: 'no topping' }, spr: { yes: 'sprinkles', no: 'no sprinkles' } };
+function atomHolds(a, item) { return item[a.f] === a.v; }
+function condHolds(c, item) { return c.op === 'one' ? atomHolds(c.a, item) : c.op === 'and' ? atomHolds(c.a, item) && atomHolds(c.b, item) : atomHolds(c.a, item) || atomHolds(c.b, item); }
+// Should this cupcake be tossed under the order?
+function shouldToss(order, item) { const c = condHolds(order.cond, item); return order.act === 'toss' ? c : !c; }
+function randomAtom(f) { return { f, v: pick(FEATURES[f]) }; }
+function makeOrder(n) {
+  const feats = Object.keys(FEATURES).sort(() => rnd() - .5);
+  let cond;
+  if (n <= 2) cond = { op: 'one', a: randomAtom(feats[0]) };
+  else cond = { op: rnd() < .5 ? 'or' : 'and', a: randomAtom(feats[0]), b: randomAtom(feats[1]) };
+  const act = n >= 5 && rnd() < .5 ? 'box' : 'toss';
+  return { n, cond, act };
+}
+function orderText(o) {
+  const c = o.cond, a = LABEL[c.a.f][c.a.v];
+  const body = c.op === 'one' ? a : `${a} ${c.op} ${LABEL[c.b.f][c.b.v]}`;
+  return (o.act === 'toss' ? 'TOSS: ' : 'BOX ONLY: ') + body;
+}
+// A cupcake; about half of each order's cupcakes must be tossed.
+function makeItem(order) {
+  const want = rnd() < .5;
+  let item;
+  for (let k = 0; k < 80; k++) {
+    item = { frost: pick(FEATURES.frost), top: pick(FEATURES.top), spr: pick(FEATURES.spr), seed: rnd() * 1000 };
+    if (shouldToss(order, item) === want) break;
+  }
+  return item;
+}
+// Why: "Toss it: it has pink frosting and no topping."
+function reason(order, item) {
+  const fs = order.cond.op === 'one' ? [order.cond.a.f] : [order.cond.a.f, order.cond.b.f];
+  const has = fs.map(f => LABEL[f][item[f]]).join(' and ');
+  return `${shouldToss(order, item) ? 'Toss' : 'Box'} it: it has ${has}.`;
+}
+
+// ---------- state
+let state = 'intro', T = 0, el = 0, lives = LIVES, score = 0, best = 0, sorted = 0;
+let order = null, orderNo = 0, spawned = 0, items = [], flying = [], orderAt = -9, why = '', whyAt = -9, beltX = 0, flash = { t: -9, ok: true };
+try { best = Number(localStorage.getItem('cupcakecheck_best') || 0); } catch (e) { /* storage off */ }
+function speed() { return Math.min(100, 38 + sorted * 1.6); }
+function startRun() { state = 'play'; el = 0; lives = LIVES; score = 0; sorted = 0; orderNo = 0; items = []; flying = []; why = ''; nextOrder(); }
+function nextOrder() { orderNo++; order = makeOrder(orderNo); spawned = 0; orderAt = el; }
+function paused() { return el - orderAt < ORDER_PAUSE; }
+// The cupcake being checked: the front one not yet sorted.
+function front() { let f = null; for (const it of items) if (!f || it.x > f.x) f = it; return f; }
+
+function update(dt) {
+  if (state !== 'play') return;
+  el += dt;
+  for (const f of flying) f.u += dt / .45;
+  flying = flying.filter(f => f.u < 1);
+  if (paused()) return;
+  const v = speed();
+  beltX += v * dt;
+  for (const it of items) it.x += v * dt;
+  // Spawn the order's cupcakes, evenly spaced.
+  const last = items.length ? Math.min(...items.map(i => i.x)) : 1e9;
+  if (spawned < PER_ORDER && (items.length === 0 || last - SPAWN_X >= SPACING)) {
+    items.push(Object.assign(makeItem(order), { x: SPAWN_X })); spawned++;
+  }
+  // A cupcake that leaves the window unsorted.
+  const f = front();
+  if (f && f.x > WIN_R + 6) { miss(f); if (state !== 'play') return; }
+  // The order is done when its cupcakes are all sorted: a new order.
+  if (spawned >= PER_ORDER && items.length === 0 && flying.length === 0) nextOrder();
+}
+function miss(f) {
+  items = items.filter(i => i !== f);
+  flying.push({ item: f, from: [f.x, BELT_Y], to: [W + 60, BELT_Y + 60], u: 0 });
+  lose('Too late! ' + reason(order, f));
+}
+function sort(toss) {
+  if (state !== 'play' || paused()) return;
+  const f = front();
+  if (!f) return;
+  audio();
+  items = items.filter(i => i !== f);
+  flying.push({ item: f, from: [f.x, BELT_Y], to: toss ? BIN : BOX, u: 0 });
+  sorted++;
+  if (shouldToss(order, f) === toss) { score++; flash = { t: T, ok: true, toss }; sGood(toss); }
+  else { flash = { t: T, ok: false, toss }; lose(reason(order, f)); }
+}
+function lose(r) {
+  lives--; why = r; whyAt = T; sBad();
+  if (lives <= 0) { state = 'over'; sEnd(); if (score > best) { best = score; try { localStorage.setItem('cupcakecheck_best', String(best)); } catch (e) { /* storage off */ } } }
+}
+
+// ---------- drawing helpers
+function rrect(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+function ell(x, y, rx, ry, col, rot = 0) { ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(x, y, Math.max(.1, rx), Math.max(.1, ry), rot, 0, TAU); ctx.fill(); }
+function lin(x0, y0, x1, y1, stops) { const g = ctx.createLinearGradient(x0, y0, x1, y1); stops.forEach(([o, c]) => g.addColorStop(o, c)); return g; }
+function starPath(x, y, r) { ctx.beginPath(); for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, q = i % 2 ? r * .45 : r; ctx.lineTo(x + Math.cos(a) * q, y + Math.sin(a) * q); } ctx.closePath(); }
+const FROST = { pink: ['#ffb3cf', '#f27aa6'], blue: ['#a8dcff', '#5fb0ea'], white: ['#ffffff', '#dcd6e4'], choc: ['#9a6646', '#6b4026'] };
+const SPRINKLE = ['#ff5a7a', '#ffd23f', '#5fc282', '#5fb0ea', '#b27cd8'];
+function hash(n) { const x = Math.sin(n * 127.1 + 31.7) * 43758.5453; return x - Math.floor(x); }
+
+// A cupcake standing on (x, y), s = size.
+function drawCupcake(it, x, y, s = 1, part = 'all') {
+  ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+  if (part !== 'top') {
+    ell(0, 2, 22, 4, 'rgba(90,50,20,.18)');
+    ctx.fillStyle = lin(-20, 0, 20, 0, [[0, '#e9a94c'], [.5, '#f8cf7c'], [1, '#d9933a']]);
+    ctx.beginPath(); ctx.moveTo(-20, -26); ctx.lineTo(20, -26); ctx.lineTo(15, 0); ctx.lineTo(-15, 0); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(160,90,30,.45)'; ctx.lineWidth = 1.4;
+    for (let k = -3; k <= 3; k++) { ctx.beginPath(); ctx.moveTo(k * 5.6, -26); ctx.lineTo(k * 4.2, 0); ctx.stroke(); }
+  }
+  // Frosting swirl.
+  const [c0, c1] = FROST[it.frost];
+  const g = lin(0, -58, 0, -22, [[0, c0], [1, c1]]);
+  ell(0, -27, 24, 8, c1); ell(0, -33, 22, 9, g); ell(0, -42, 17, 8, g); ell(0, -50, 11, 7, g); ell(0, -56, 5, 4.5, g);
+  ell(-7, -44, 5, 2.4, 'rgba(255,255,255,.45)', -.3);
+  if (it.spr === 'yes') {
+    for (let k = 0; k < 14; k++) {
+      const a = hash(it.seed + k) * TAU, r = 4 + hash(it.seed + k + 50) * 15, yy = -28 - hash(it.seed + k + 90) * 26;
+      const xx = Math.cos(a) * r * (1 - (-28 - yy) / 40);
+      ctx.save(); ctx.translate(xx, yy); ctx.rotate(a); ctx.fillStyle = SPRINKLE[k % 5]; rrect(-2.6, -.9, 5.2, 1.8, .9); ctx.fill(); ctx.restore();
+    }
+  }
+  if (it.top === 'cherry') {
+    ctx.strokeStyle = '#5a8a2a'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(0, -64); ctx.quadraticCurveTo(3, -72, 8, -75); ctx.stroke();
+    ell(0, -63, 6.5, 6.5, '#d8302c'); ell(-2, -65, 2, 1.6, 'rgba(255,255,255,.6)');
+  } else if (it.top === 'star') {
+    ctx.fillStyle = '#ffcf3a'; starPath(0, -66, 9); ctx.fill(); ctx.strokeStyle = '#e8a812'; ctx.lineWidth = 1.2; ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// Small icons for the order card.
+function atomIcon(a, x, y) {
+  const base = { frost: 'white', top: 'none', spr: 'no', seed: 7 };
+  if (a.f === 'frost') drawCupcake(Object.assign(base, { frost: a.v }), x, y, .8, 'top');
+  else if (a.f === 'top') {
+    drawCupcake(Object.assign(base, { frost: 'white', top: a.v }), x, y, .8, 'top');
+    if (a.v === 'none') { ctx.strokeStyle = '#d9483a'; ctx.lineWidth = 2.4; ctx.beginPath(); ctx.arc(x, y - 56, 10, 0, TAU); ctx.moveTo(x - 7, y - 63); ctx.lineTo(x + 7, y - 49); ctx.stroke(); }
+  } else {
+    drawCupcake(Object.assign(base, { frost: 'white', spr: a.v, seed: 3 }), x, y, .8, 'top');
+    if (a.v === 'no') { ctx.strokeStyle = '#d9483a'; ctx.lineWidth = 2.4; ctx.beginPath(); ctx.moveTo(x - 15, y - 50); ctx.lineTo(x + 15, y - 28); ctx.stroke(); }
+  }
+}
+
+function drawCard() {
+  const y0 = 80, h = 122, fresh = el - orderAt < ORDER_PAUSE, pulse = fresh ? 1 + .04 * Math.sin(T * 12) : 1;
+  ctx.save(); ctx.translate(180, y0 + h / 2); ctx.scale(pulse, pulse); ctx.rotate(-.012); ctx.translate(-180, -(y0 + h / 2));
+  ctx.fillStyle = 'rgba(120,70,40,.18)'; rrect(22, y0 + 5, 316, h, 14); ctx.fill();
+  ctx.fillStyle = lin(0, y0, 0, y0 + h, [[0, '#fffdf6'], [1, '#fff3e0']]); rrect(22, y0, 316, h, 14); ctx.fill();
+  ctx.strokeStyle = fresh ? '#ff9a2a' : 'rgba(200,140,90,.5)'; ctx.lineWidth = fresh ? 3 : 1.4; ctx.stroke();
+  ell(180, y0 + 4, 5, 5, '#e8584a'); ell(179, y0 + 3, 1.6, 1.6, 'rgba(255,255,255,.7)');
+  ctx.fillStyle = '#b07a4a'; ctx.font = '700 11px "Trebuchet MS", system-ui, sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText(`ORDER ${orderNo}`, 180, y0 + 22);
+  const toss = order.act === 'toss';
+  ctx.fillStyle = toss ? '#e0553f' : '#3f9e62'; ctx.font = '900 17px "Trebuchet MS", system-ui, sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText(toss ? 'TOSS:' : 'BOX ONLY:', 34, y0 + 66);
+  const c = order.cond, x0 = toss ? 150 : 175;
+  if (c.op === 'one') { atomIcon(c.a, x0 + 40, y0 + 92); caption(c.a, x0 + 40, y0 + 108); }
+  else {
+    atomIcon(c.a, x0, y0 + 92); caption(c.a, x0, y0 + 108);
+    ctx.fillStyle = '#7a4a1e'; ctx.font = '900 15px "Trebuchet MS", system-ui, sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText(c.op.toUpperCase(), x0 + 50, y0 + 66);
+    atomIcon(c.b, x0 + 100, y0 + 92); caption(c.b, x0 + 100, y0 + 108);
+  }
+  ctx.restore();
+}
+function caption(a, x, y) { ctx.fillStyle = '#7a5a40'; ctx.font = '600 10.5px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.fillText(LABEL[a.f][a.v], x, y); }
+
+function drawFactory() {
+  // A tiled bakery wall, the belt, the check window, the bin and the box.
+  ctx.fillStyle = lin(0, 70, 0, 520, [[0, '#fff6ec'], [1, '#ffe7d2']]); ctx.fillRect(0, 70, W, 450);
+  ctx.strokeStyle = 'rgba(230,180,140,.35)'; ctx.lineWidth = 1;
+  for (let y = 210; y < 520; y += 24) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); for (let x = (y / 24 % 2) * 24; x < W; x += 48) { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + 24); ctx.stroke(); } }
+  // Bunting.
+  for (let k = 0; k < 10; k++) { const x = k * 40 + 4; ctx.fillStyle = ['#ff9eb5', '#ffd166', '#8fd3a8', '#9fc8ff'][k % 4]; ctx.beginPath(); ctx.moveTo(x, 214); ctx.lineTo(x + 32, 214); ctx.lineTo(x + 16, 234); ctx.closePath(); ctx.fill(); }
+  ctx.strokeStyle = '#c98a5a'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(0, 214); ctx.lineTo(W, 214); ctx.stroke();
+  // Belt.
+  ctx.fillStyle = '#8a8f9c'; rrect(-10, BELT_Y, W + 20, 26, 10); ctx.fill();
+  ctx.fillStyle = lin(0, BELT_Y, 0, BELT_Y + 12, [[0, '#5a5f6c'], [1, '#3e424c']]); ctx.fillRect(-10, BELT_Y, W + 20, 12);
+  ctx.strokeStyle = 'rgba(255,255,255,.12)'; ctx.lineWidth = 2;
+  for (let x = -40 + (beltX % 20); x < W + 20; x += 20) { ctx.beginPath(); ctx.moveTo(x, BELT_Y + 1); ctx.lineTo(x - 6, BELT_Y + 11); ctx.stroke(); }
+  for (let x = 10; x < W; x += 40) { ell(x, BELT_Y + 19, 6, 6, '#b9bec9'); ell(x, BELT_Y + 19, 2, 2, '#6a6f7a'); }
+  ctx.fillStyle = '#6a6f7a'; ctx.fillRect(20, BELT_Y + 26, 10, 60); ctx.fillRect(W - 30, BELT_Y + 26, 10, 60);
+}
+
+function drawWindow() {
+  // The check window: a frame with a lamp; green or red flash after a sort.
+  const fl = T - flash.t < .35, col = !fl ? '#ffd166' : flash.ok ? '#5fc282' : '#ff5a5a';
+  ctx.strokeStyle = 'rgba(110,70,40,.85)'; ctx.lineWidth = 6; rrect(WIN_L, 246, WIN_R - WIN_L, 118, 12); ctx.stroke();
+  ctx.strokeStyle = '#f2c46a'; ctx.lineWidth = 3; ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,.12)'; rrect(WIN_L + 3, 249, WIN_R - WIN_L - 6, 112, 10); ctx.fill();
+  ctx.fillStyle = '#6e4a2c'; rrect(165, 228, 30, 14, 5); ctx.fill();
+  ell(180, 236, 8, 6, col); ell(178, 234, 2.5, 2, 'rgba(255,255,255,.7)');
+  if (fl) { ctx.fillStyle = flash.ok ? 'rgba(95,194,130,.25)' : 'rgba(255,90,90,.25)'; rrect(WIN_L + 3, 249, WIN_R - WIN_L - 6, 112, 10); ctx.fill(); }
+  ctx.fillStyle = '#8a5a34'; ctx.font = '800 9px "Trebuchet MS", system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.fillText('CHECK', 180, 260);
+}
+
+function drawBinAndBox() {
+  // The bin (left).
+  const [bx, by] = BIN;
+  ctx.fillStyle = 'rgba(90,50,20,.18)'; ell(bx, by + 36, 40, 7, 'rgba(90,50,20,.18)');
+  ctx.fillStyle = lin(bx - 34, 0, bx + 34, 0, [[0, '#9a9fab'], [.5, '#c3c8d2'], [1, '#8a8f9c']]);
+  ctx.beginPath(); ctx.moveTo(bx - 34, by - 8); ctx.lineTo(bx + 34, by - 8); ctx.lineTo(bx + 28, by + 36); ctx.lineTo(bx - 28, by + 36); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#6a6f7a'; rrect(bx - 38, by - 14, 76, 9, 4); ctx.fill();
+  ctx.strokeStyle = 'rgba(80,80,90,.35)'; ctx.lineWidth = 2; for (const dx of [-14, 0, 14]) { ctx.beginPath(); ctx.moveTo(bx + dx, by); ctx.lineTo(bx + dx * .85, by + 30); ctx.stroke(); }
+  // The box (right), open, with a bow.
+  const [cx, cy] = BOX;
+  ell(cx, cy + 36, 44, 7, 'rgba(90,50,20,.18)');
+  ctx.fillStyle = '#f7b8c9'; ctx.beginPath(); ctx.moveTo(cx - 40, cy - 8); ctx.lineTo(cx - 50, cy - 22); ctx.lineTo(cx - 6, cy - 22); ctx.lineTo(cx - 2, cy - 8); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(cx + 40, cy - 8); ctx.lineTo(cx + 50, cy - 22); ctx.lineTo(cx + 6, cy - 22); ctx.lineTo(cx + 2, cy - 8); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = lin(0, cy - 8, 0, cy + 36, [[0, '#ffd0dc'], [1, '#f49ab3']]); rrect(cx - 40, cy - 8, 80, 44, 6); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.fillRect(cx - 4, cy - 8, 8, 44);
+  ell(cx - 8, cy + 6, 8, 5, '#ffffff', .4); ell(cx + 8, cy + 6, 8, 5, '#ffffff', -.4); ell(cx, cy + 7, 3.5, 3.5, '#ffe3ea');
+}
+
+function drawBelt() {
+  for (const it of items) drawCupcake(it, it.x, BELT_Y, 1);
+  // The front cupcake gets a soft ring so the player knows which one is next.
+  const f = front();
+  if (f && state === 'play') { ctx.strokeStyle = 'rgba(255,170,60,.55)'; ctx.lineWidth = 2; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.ellipse(f.x, BELT_Y + 2, 26, 6, 0, 0, TAU); ctx.stroke(); ctx.setLineDash([]); }
+  for (const fl of flying) {
+    const u = fl.u, x = fl.from[0] + (fl.to[0] - fl.from[0]) * u, y = fl.from[1] + (fl.to[1] - fl.from[1]) * u - Math.sin(u * Math.PI) * 80;
+    drawCupcake(fl.item, x, y, 1 - u * .45);
+  }
+}
+
+function heart(x, y, r, full) {
+  ctx.beginPath(); ctx.moveTo(x, y + r * .9);
+  ctx.bezierCurveTo(x - r * 1.6, y - r * .2, x - r * .7, y - r * 1.3, x, y - r * .45);
+  ctx.bezierCurveTo(x + r * .7, y - r * 1.3, x + r * 1.6, y - r * .2, x, y + r * .9);
+  ctx.fillStyle = full ? lin(x, y - r, x, y + r, [[0, '#ff8f98'], [1, '#f04a5a']]) : '#ecdcd0'; ctx.fill();
+  if (full) ell(x - r * .45, y - r * .35, r * .28, r * .18, 'rgba(255,255,255,.7)', -.6);
+}
+function drawHud() {
+  ctx.fillStyle = lin(0, 0, 0, 72, [[0, '#fffaf3'], [1, '#fff1e2']]); ctx.fillRect(0, 0, W, 72);
+  ctx.fillStyle = 'rgba(160,100,60,.12)'; ctx.fillRect(0, 70, W, 2);
+  ctx.fillStyle = '#e8584a'; ctx.font = '800 13px "Trebuchet MS", system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.fillText('C U P C A K E   C H E C K', 180, 22);
+  ctx.fillStyle = 'rgba(160,100,60,.14)'; rrect(132, 31, 96, 36, 18); ctx.fill();
+  ctx.fillStyle = '#fffdf8'; rrect(132, 28, 96, 36, 18); ctx.fill(); ctx.strokeStyle = 'rgba(232,88,74,.4)'; ctx.lineWidth = 1.2; ctx.stroke();
+  ctx.fillStyle = '#b8462e'; ctx.font = '800 24px "Trebuchet MS", system-ui, sans-serif'; ctx.fillText(String(score), 180, 54);
+  for (let i = 0; i < LIVES; i++) heart(26 + i * 25, 46, 8.5, i < lives);
+  if (state !== 'intro') { ctx.fillStyle = '#b08a6a'; ctx.font = '700 11px system-ui, sans-serif'; ctx.textAlign = 'right'; ctx.fillText(`${Math.min(spawned, PER_ORDER)} / ${PER_ORDER}`, 340, 50); }
+}
+
+function bigButton(r, label, face, edge, icon, down) {
+  const [x, y, w, h] = r, dy = down ? 3 : 0;
+  ctx.fillStyle = edge; rrect(x, y + 6, w, h, 24); ctx.fill();
+  ctx.fillStyle = face; rrect(x, y + dy, w, h, 24); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,.22)'; rrect(x + 5, y + 4 + dy, w - 10, h * .4, 18); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.font = '800 21px "Trebuchet MS", system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(label, x + w / 2 + (icon === 'bin' ? 12 : -12), y + h / 2 + dy + 1); ctx.textBaseline = 'alphabetic';
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.6; ctx.lineCap = 'round';
+  if (icon === 'bin') { const cx = x + 30, cy = y + h / 2 + dy; ctx.beginPath(); ctx.moveTo(cx - 10, cy - 7); ctx.lineTo(cx + 10, cy - 7); ctx.moveTo(cx - 7, cy - 7); ctx.lineTo(cx - 5, cy + 10); ctx.lineTo(cx + 5, cy + 10); ctx.lineTo(cx + 7, cy - 7); ctx.moveTo(cx - 3, cy - 11); ctx.lineTo(cx + 3, cy - 11); ctx.stroke(); }
+  else { const cx = x + w - 30, cy = y + h / 2 + dy; ctx.beginPath(); ctx.rect(cx - 10, cy - 6, 20, 16); ctx.moveTo(cx - 10, cy - 6); ctx.lineTo(cx - 13, cy - 11); ctx.moveTo(cx + 10, cy - 6); ctx.lineTo(cx + 13, cy - 11); ctx.stroke(); }
+  ctx.lineCap = 'butt';
+}
+const BTN_TOSS = [18, 530, 156, 66], BTN_BOX = [186, 530, 156, 66];
+function drawPanel() {
+  ctx.fillStyle = lin(0, 518, 0, H, [[0, '#fff1e2'], [1, '#fffaf3']]); ctx.fillRect(0, 518, W, H - 518);
+  ctx.fillStyle = 'rgba(160,100,60,.12)'; ctx.fillRect(0, 518, W, 2);
+  const down = T - flash.t < .12;
+  bigButton(BTN_TOSS, 'Toss', '#f27a63', '#c9503f', 'bin', down && flash.toss);
+  bigButton(BTN_BOX, 'Box', '#5fc282', '#3f9e62', 'box', down && !flash.toss);
+  ctx.textAlign = 'center';
+  if (state === 'play' && T - whyAt < 2 && why) {
+    ctx.fillStyle = 'rgba(240,90,70,.12)'; rrect(16, 604, 328, 26, 13); ctx.fill();
+    ctx.fillStyle = '#d9483a'; ctx.font = '700 12.5px "Trebuchet MS", system-ui, sans-serif'; ctx.fillText(why, 180, 622);
+  } else if (state === 'play') {
+    ctx.fillStyle = '#b08a6a'; ctx.font = '600 11.5px system-ui, sans-serif'; ctx.fillText('Check the front cupcake, then Toss or Box it.', 180, 621);
+  }
+}
+
+function drawBanner() {
+  const s = el - orderAt;
+  if (state !== 'play' || s > ORDER_PAUSE) return;
+  const a = Math.min(1, s * 6, (ORDER_PAUSE - s) * 4);
+  ctx.globalAlpha = a;
+  ctx.fillStyle = 'rgba(255,253,246,.96)'; rrect(70, 272, 220, 70, 20); ctx.fill();
+  ctx.strokeStyle = '#ff9a2a'; ctx.lineWidth = 2.5; ctx.stroke();
+  ctx.fillStyle = '#e8584a'; ctx.font = '900 22px "Trebuchet MS", system-ui, sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText(orderNo === 1 ? 'First order!' : 'New order!', 180, 304);
+  ctx.fillStyle = '#7a5a40'; ctx.font = '600 12px system-ui, sans-serif'; ctx.fillText('Read the card above.', 180, 326);
+  ctx.globalAlpha = 1;
+}
+
+let btnY = 0;
+function button(x, y, w, h, label) {
+  ctx.fillStyle = '#3f9e62'; rrect(x, y + 5, w, h, 26); ctx.fill();
+  ctx.fillStyle = lin(0, y, 0, y + h, [[0, '#74d394'], [1, '#4fb874']]); rrect(x, y, w, h, 26); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,.25)'; rrect(x + 5, y + 4, w - 10, h * .4, 20); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.font = '800 20px "Trebuchet MS", system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(label, x + w / 2, y + h / 2 + 1); ctx.textBaseline = 'alphabetic';
+}
+function card(title, lines, btn, note, y0) {
+  const h = 76 + lines.length * 22 + 74 + (note ? 18 : 0);
+  ctx.fillStyle = 'rgba(255,246,236,.75)'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = 'rgba(120,70,40,.18)'; rrect(26, y0 + 8, 308, h, 26); ctx.fill();
+  ctx.fillStyle = lin(0, y0, 0, y0 + h, [[0, '#fffdf8'], [1, '#fff3e6']]); rrect(26, y0, 308, h, 26); ctx.fill();
+  ctx.strokeStyle = 'rgba(232,88,74,.45)'; ctx.lineWidth = 1.5; ctx.stroke();
+  drawCupcake({ frost: 'pink', top: 'cherry', spr: 'yes', seed: 5 }, 300, y0 + 24, .55);
+  ctx.textAlign = 'center'; ctx.fillStyle = '#e8584a'; ctx.font = '800 28px "Trebuchet MS", system-ui, sans-serif'; ctx.fillText(title, 180, y0 + 44);
+  ctx.fillStyle = '#5a4a40'; ctx.font = '14px system-ui, sans-serif';
+  lines.forEach((l, i) => ctx.fillText(l, 180, y0 + 76 + i * 22));
+  btnY = y0 + 76 + lines.length * 22;
+  button(80, btnY, 200, 56, btn);
+  if (note) { ctx.fillStyle = '#b8a090'; ctx.font = '11px system-ui, sans-serif'; ctx.fillText(note, 180, btnY + 82); }
+}
+
+// ---------- sound
+let AC = null, master = null;
+function audio() {
+  if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+  try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return; }
+  master = AC.createGain(); master.gain.value = .6; master.connect(AC.destination);
+}
+function tone(f, when, dur, vol, type = 'sine', to = 0) {
+  if (!AC) return;
+  const o = AC.createOscillator(), g = AC.createGain(); o.type = type; o.frequency.setValueAtTime(f, when);
+  if (to) o.frequency.exponentialRampToValueAtTime(to, when + dur);
+  g.gain.setValueAtTime(0, when); g.gain.linearRampToValueAtTime(vol, when + .012); g.gain.exponentialRampToValueAtTime(.0005, when + dur);
+  o.connect(g); g.connect(master); o.start(when); o.stop(when + dur + .05);
+}
+function sGood(toss) { if (!AC) return; const t = AC.currentTime; if (toss) tone(500, t, .14, .08, 'triangle', 300); else { tone(784, t, .12, .07, 'triangle'); tone(1047, t + .08, .18, .06, 'triangle'); } }
+function sBad() { if (AC) tone(240, AC.currentTime, .3, .12, 'triangle', 140); }
+function sOrder() { if (!AC) return; const t = AC.currentTime; [523, 659, 784].forEach((f, i) => tone(f, t + i * .1, .3, .06, 'triangle')); }
+function sEnd() { if (AC) { const t = AC.currentTime; [784, 659, 523].forEach((f, i) => tone(f, t + i * .14, .4, .08, 'triangle')); } }
+function sClick() { if (AC) tone(880, AC.currentTime, .04, .05, 'triangle'); }
+
+// ---------- input
+function hit(x, y, r) { return x >= r[0] && x <= r[0] + r[2] && y >= r[1] && y <= r[1] + r[3]; }
+function pagePos(e) { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) / scale, (e.clientY - r.top) / scale]; }
+cv.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  const [x, y] = pagePos(e);
+  audio();
+  if (state === 'intro' || state === 'over') { if (x >= 80 && x <= 280 && y >= btnY && y <= btnY + 56) { sClick(); startRun(); } return; }
+  if (hit(x, y, BTN_TOSS)) sort(true); else if (hit(x, y, BTN_BOX)) sort(false);
+});
+addEventListener('keydown', e => {
+  if ((state === 'intro' || state === 'over') && (e.key === 'Enter' || e.key === ' ')) { audio(); startRun(); return; }
+  if (e.key === 'ArrowLeft' || e.key === 'a') sort(true);
+  if (e.key === 'ArrowRight' || e.key === 'd') sort(false);
+});
+
+// ---------- frame
+let last = performance.now(), lastOrder = 0;
+function frame(now) {
+  const dt = Math.min(.05, (now - last) / 1000); last = now; T += dt;
+  update(dt);
+  if (orderNo !== lastOrder) { lastOrder = orderNo; if (state === 'play') sOrder(); }
+  ctx.setTransform(dpr * scale, 0, 0, dpr * scale, 0, 0);
+  drawFactory(); drawBinAndBox(); drawWindow(); drawBelt(); if (order) drawCard(); drawBanner(); drawHud(); drawPanel();
+  if (state === 'intro') card('Cupcake Check', ['Cupcakes roll through the check window.', 'The order card says which ones to TOSS.', 'Box all the others!', 'Toss = left button, Box = right button.', 'A new order every 10 cupcakes. Three hearts.'], "Let's go", 'draft 1  ·  sound on', 150);
+  if (state === 'over') card('No hearts left!', [why, `Cupcakes sorted right: ${score}`, score >= best && score > 0 ? 'A new best!' : `Best: ${best}`], 'Play again', '', 170);
+  requestAnimationFrame(frame);
+}
+
+// ---------- tests and screenshots
+function autoPlay() { const f = front(); if (f && f.x > WIN_L - 10 && !paused()) sort(shouldToss(order, f)); }
+if (!order) { order = makeOrder(1); orderNo = 1; }
+if (Q.get('t')) { startRun(); const until = Number(Q.get('t')); lives = 99; while (el < until) { autoPlay(); update(1 / 60); T += 1 / 60; } lives = Math.min(lives, LIVES); }
+if (Q.has('over')) { state = 'over'; score = 31; best = 40; why = 'Toss it: it has pink frosting and no topping.'; }
+window.__cc = { startRun, update, sort, front, autoPlay, makeOrder, makeItem, shouldToss, reason, orderText, condHolds, speed, FEATURES,
+  get state() { return state; }, get lives() { return lives; }, set lives(v) { lives = v; }, get score() { return score; }, get order() { return order; },
+  get orderNo() { return orderNo; }, get items() { return items; }, get el() { return el; }, get why() { return why; }, paused, setRnd: f => rnd = f };
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
