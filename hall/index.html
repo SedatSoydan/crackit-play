@@ -122,7 +122,7 @@ const ANOMALIES = [
   { id: 'door_open', tier: 1, text: 'A door stood open.', apply: s => { const d = byId(s.doors, 'B'); d.open = .85; d.eyes = true; return hlDoor(d); } },
   { id: 'lamps_left_off', tier: 1, text: 'The lamps on the left were off.', apply: s => { s.sconces.filter(o => o.side < 0).forEach(o => o.on = false); return hl(proj(-.95, .6, 4.6), 70); } },
   { id: 'painting_upside', tier: 1, text: 'The painting was upside down.', apply: s => { const p = byId(s.paintings, 'PR'); p.flip = true; return hlPainting(p); } },
-  { id: 'figure', tier: 1, text: 'Someone was standing at the end.', apply: s => { s.figure = true; return hl(proj(.22, .35, 7.8), 30); } },
+  { id: 'figure', tier: 1, text: 'Someone was standing at the end.', apply: s => { s.figure = true; return hl(proj(-.35, .35, 7.8), 30); } },
   { id: 'red_light', tier: 1, text: 'The lights were red.', apply: s => { s.red = true; return hl(proj(0, .9, 3.2), 90); } },
   { id: 'footprints', tier: 1, text: 'There were wet footprints on the carpet.', apply: s => { s.footprints = true; return hl(proj(0, 0, 2.6), 70); } },
   { id: 'dnd_all', tier: 1, text: 'Every door said DO NOT DISTURB.', apply: s => { s.doors.forEach(d => d.dnd = true); return hlDoor(byId(s.doors, 'A')); } },
@@ -524,7 +524,7 @@ function drawPlant(s) {
 
 function drawFigure(s) {
   if (!s.figure) return;
-  const z = 7.8, k = K(z), b = proj(.22, 0, z), sway = Math.sin(T * .7) * .015 * k;
+  const z = 7.8, k = K(z), b = proj(-.35, 0, z), sway = Math.sin(T * .7) * .015 * k;
   ctx.fillStyle = 'rgba(2,1,3,.96)';
   ctx.beginPath(); ctx.moveTo(b[0] - .2 * k, b[1]); ctx.lineTo(b[0] - .24 * k + sway, b[1] - 1.42 * k); ctx.quadraticCurveTo(b[0] + sway, b[1] - 1.56 * k, b[0] + .24 * k + sway, b[1] - 1.42 * k); ctx.lineTo(b[0] + .2 * k, b[1]); ctx.closePath(); ctx.fill();
   ctx.beginPath(); ctx.ellipse(b[0] + sway, b[1] - 1.64 * k, .1 * k, .13 * k, 0, 0, 7); ctx.fill();
