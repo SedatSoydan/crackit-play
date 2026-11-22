@@ -12,8 +12,9 @@ canvas{display:block;margin:0 auto}
 <body>
 <canvas id="c"></canvas>
 <script>
-// Odd Duck, draft 1: rubber ducks all move the same way, except one. Tap it.
-const W = 360, H = 640, BX = 16, BY = 128, BS = 328, RUN = 60, PENALTY = 3, HINT_AFTER = 7, BEAT = 1.6;
+// Odd Duck, draft 2: rubber ducks all move the same way, except one. Tap it.
+// Each round has its own clock; a wrong tap or a round that runs out costs a heart.
+const W = 360, H = 640, BX = 16, BY = 128, BS = 328, ROUND_TIME = 12, LIVES = 3, HINT_AFTER = 6, SHOW_MISS = 1.8, BEAT = 1.6;
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 let scale = 1, dpr = 1;
 function resize() {
@@ -198,15 +199,24 @@ function sEnd() { if (!AC) return; const t = AC.currentTime; [784, 659, 523].for
 function sClick() { if (!AC) return; tone(880, AC.currentTime, .04, .05, 'triangle'); }
 
 // ---------- game
-let state = 'intro', T = 0, left = RUN, score = 0, roundNo = 1, round = makeRound(1), busyUntil = 0, lastWhole = RUN, flash = -9;
+// state: intro, play, miss (a heart lost: the odd duck is shown), over.
+let state = 'intro', T = 0, lives = LIVES, score = 0, roundNo = 1, round = makeRound(1), busyUntil = 0, flash = -9;
+let roundLeft = ROUND_TIME, lastWhole = ROUND_TIME, missUntil = 0, missWhy = '', lostAt = -9;
 let shakes = {}, sparks = [], best = 0;
 try { best = Number(localStorage.getItem('oddduck_best') || 0); } catch (e) { /* storage off */ }
 
 function startRun() {
-  state = 'play'; left = RUN; score = 0; roundNo = 1; lastKey = ''; shakes = {}; sparks = [];
-  round = makeRound(1); round.t0 = T; busyUntil = 0;
+  state = 'play'; lives = LIVES; score = 0; roundNo = 1; lastKey = ''; shakes = {}; sparks = [];
+  round = makeRound(1); round.t0 = T; busyUntil = 0; roundLeft = ROUND_TIME;
 }
-function nextRound() { roundNo++; round = makeRound(roundNo); round.t0 = T; shakes = {}; }
+function nextRound() { roundNo++; round = makeRound(roundNo); round.t0 = T; shakes = {}; roundLeft = ROUND_TIME; state = 'play'; }
+function loseHeart(why) {
+  lives--; lostAt = T; flash = T;
+  if (why === 'time' || lives <= 0) {
+    // Show the odd duck and why, then go on (or end).
+    state = 'miss'; missWhy = why; missUntil = T + SHOW_MISS;
+  }
+}
 function tapCell(i) {
   if (state !== 'play' || T < busyUntil) return;
   audio();
@@ -215,7 +225,7 @@ function tapCell(i) {
     const r = cellRect(round, i); sparks.push({ x: r.x + r.cs / 2, y: r.y + r.cs / 2, t: T });
     busyUntil = T + .45; setTimeout(() => { if (state === 'play') nextRound(); }, 450);
   } else {
-    shakes[i] = T; left = Math.max(0, left - PENALTY); flash = T; sBoop();
+    shakes[i] = T; sBoop(); loseHeart('tap');
   }
 }
 function endRun() {
@@ -233,6 +243,7 @@ cv.addEventListener('pointerdown', e => {
     if (x >= BTN[0] && x <= BTN[0] + BTN[2] && y >= btnY && y <= btnY + BTN[3]) { audio(); sClick(); startRun(); }
     return;
   }
+  if (state !== 'play') return;
   if (x < BX || x > BX + BS || y < BY || y > BY + BS) return;
   const n = round.size, cs = BS / n;
   tapCell(Math.floor((y - BY) / cs) * n + Math.floor((x - BX) / cs));
@@ -247,15 +258,29 @@ function button(x, y, w, h, label) {
   ctx.fillText(label, x + w / 2, y + h / 2 + 1); ctx.textBaseline = 'alphabetic';
 }
 
+function heart(x, y, r, full) {
+  ctx.beginPath(); ctx.moveTo(x, y + r * .9);
+  ctx.bezierCurveTo(x - r * 1.6, y - r * .2, x - r * .7, y - r * 1.3, x, y - r * .45);
+  ctx.bezierCurveTo(x + r * .7, y - r * 1.3, x + r * 1.6, y - r * .2, x, y + r * .9);
+  ctx.fillStyle = full ? '#ff6f7a' : '#d7e6ee'; ctx.fill();
+}
 function drawHud() {
   ctx.fillStyle = '#ff8c2a'; ctx.font = '700 13px "Trebuchet MS", system-ui, sans-serif'; ctx.textAlign = 'center';
-  ctx.fillText('O D D   D U C K', 180, 26);
-  ctx.fillStyle = '#2f6f99'; ctx.font = '700 34px "Trebuchet MS", system-ui, sans-serif'; ctx.fillText(String(score), 180, 66);
-  // Time bar.
-  const u = Math.max(0, left / RUN), bx = 30, bw = 300, by = 84;
-  ctx.fillStyle = '#cfe6f2'; rrect(bx, by, bw, 14, 7); ctx.fill();
-  ctx.fillStyle = T - flash < .35 ? '#ff6f5a' : u > .3 ? '#5fc282' : '#ffa53a'; rrect(bx, by, Math.max(14, bw * u), 14, 7); ctx.fill();
-  ctx.fillStyle = '#7fa6bf'; ctx.font = '11px system-ui, sans-serif'; ctx.fillText(state === 'play' ? `${Math.ceil(left)} s` : '', 180, 116);
+  ctx.fillText('O D D   D U C K', 180, 24);
+  ctx.fillStyle = '#2f6f99'; ctx.font = '700 32px "Trebuchet MS", system-ui, sans-serif'; ctx.fillText(String(score), 180, 60);
+  // Hearts, the one just lost popping.
+  for (let i = 0; i < LIVES; i++) {
+    const x = 38 + i * 24, lost = i === lives && T - lostAt < .5;
+    const r = 8 * (lost ? 1 + Math.sin((T - lostAt) * 20) * .25 : 1);
+    heart(x, 48, r, i < lives);
+  }
+  ctx.fillStyle = '#9ab0c0'; ctx.font = '11px system-ui, sans-serif'; ctx.textAlign = 'right';
+  ctx.fillText(state === 'intro' ? '' : `round ${roundNo}`, 334, 52); ctx.textAlign = 'center';
+  // This round's clock.
+  const u = Math.max(0, roundLeft / ROUND_TIME), bx = 30, bw = 300, by = 84;
+  ctx.fillStyle = '#cfe6f2'; rrect(bx, by, bw, 12, 6); ctx.fill();
+  ctx.fillStyle = T - flash < .35 ? '#ff6f5a' : u > .5 ? '#5fc282' : u > .25 ? '#ffc23d' : '#ffa53a';
+  if (u > 0) { rrect(bx, by, Math.max(12, bw * u), 12, 6); ctx.fill(); }
 }
 
 function card(title, lines, btn, note, y0) {
@@ -279,7 +304,7 @@ function overCard() {
   ctx.fillStyle = '#fffdf6'; rrect(26, y0, 308, 150, 24); ctx.fill();
   ctx.strokeStyle = 'rgba(255,140,42,.5)'; ctx.lineWidth = 1.5; ctx.stroke();
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#ff8c2a'; ctx.font = '700 21px "Trebuchet MS", system-ui, sans-serif'; ctx.fillText("Time's up!", 180, y0 + 29);
+  ctx.fillStyle = '#ff8c2a'; ctx.font = '700 21px "Trebuchet MS", system-ui, sans-serif'; ctx.fillText('No hearts left!', 180, y0 + 29);
   ctx.fillStyle = '#4a5a6a'; ctx.font = '600 13.5px system-ui, sans-serif'; ctx.fillText(round.text, 180, y0 + 52);
   ctx.fillStyle = '#7a8a9a'; ctx.font = '13px system-ui, sans-serif';
   ctx.fillText(`Ducks found: ${score}   ·   ` + (score >= best && score > 0 ? 'a new best!' : `best ${best}`), 180, y0 + 73);
@@ -290,13 +315,14 @@ function overCard() {
 let last = performance.now();
 function frame(now) {
   const dt = Math.min(.05, (now - last) / 1000); last = now; T += dt;
-  if (state === 'play') {
-    left -= dt;
-    const whole = Math.ceil(left);
-    if (whole !== lastWhole && left < 5 && left > 0) sTick();
+  if (state === 'play' && T >= busyUntil) {
+    roundLeft -= dt;
+    const whole = Math.ceil(roundLeft);
+    if (whole !== lastWhole && roundLeft < 3 && roundLeft > 0) sTick();
     lastWhole = whole;
-    if (left <= 0) { left = 0; endRun(); }
+    if (roundLeft <= 0) { roundLeft = 0; sBoop(); loseHeart('time'); }
   }
+  if (state === 'miss' && T >= missUntil) { if (lives <= 0) endRun(); else nextRound(); }
   ctx.setTransform(dpr * scale, 0, 0, dpr * scale, 0, 0);
   const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#f2fbff'); g.addColorStop(1, '#d9f0fb');
   ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
@@ -311,17 +337,24 @@ function frame(now) {
     ctx.fillStyle = '#5a7a90'; ctx.font = '600 15px "Trebuchet MS", system-ui, sans-serif'; ctx.textAlign = 'center';
     ctx.fillText('Tap the duck that moves differently.', 180, 500);
     ctx.fillStyle = '#9ab0c0'; ctx.font = '11px system-ui, sans-serif';
-    ctx.fillText(`round ${roundNo}  ·  best ${best}  ·  a wrong tap costs ${PENALTY} s`, 180, 522);
+    ctx.fillText(`best ${best}  ·  a wrong tap or a slow round costs a heart`, 180, 522);
   }
-  if (state === 'over') {
-    // Circle the duck that was odd, and say why.
+  if (state === 'miss' || state === 'over') {
+    // Circle the duck that was odd.
     const r = cellRect(round, round.odd), a = .6 + .4 * Math.sin(T * 5);
     ctx.strokeStyle = `rgba(255,140,42,${a})`; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(r.x + r.cs / 2, r.y + r.cs / 2, r.cs * .5, 0, TAU); ctx.stroke();
+  }
+  if (state === 'miss') {
+    ctx.fillStyle = '#ff8c2a'; ctx.font = '700 18px "Trebuchet MS", system-ui, sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText(missWhy === 'time' ? 'Too slow!' : 'Oops!', 180, 500);
+    ctx.fillStyle = '#4a5a6a'; ctx.font = '600 13.5px system-ui, sans-serif'; ctx.fillText(round.text, 180, 522);
+  }
+  if (state === 'over') {
     overCard();
   }
   if (state === 'intro') {
     ctx.fillStyle = 'rgba(230,245,252,.75)'; ctx.fillRect(0, 0, W, H);
-    card('Odd Duck', ['All the ducks move the same way,', 'except one. Tap the odd duck!', '', 'You have 60 seconds.', 'A wrong tap costs 3 seconds.'], "Let's go", 'draft 1  ·  sound on', 170);
+    card('Odd Duck', ['All the ducks move the same way,', 'except one. Tap the odd duck!', '', 'Each round has its own clock.', 'A wrong tap or a slow round', 'costs a heart. You have three.'], "Let's go", 'draft 2  ·  sound on', 160);
   }
   requestAnimationFrame(frame);
 }
@@ -330,9 +363,10 @@ function frame(now) {
 const Q = new URLSearchParams(location.search);
 if (Q.get('round')) { state = 'play'; roundNo = Number(Q.get('round')); round = makeRound(roundNo, Q.get('m') || null); round.t0 = 0; }
 if (Q.get('t')) T = Number(Q.get('t'));
-if (Q.has('over')) { state = 'over'; score = 14; best = 17; }
+if (Q.has('over')) { state = 'over'; score = 14; best = 17; lives = 0; }
+if (Q.has('miss')) { state = 'miss'; missWhy = 'time'; missUntil = 1e9; lives = 2; roundLeft = 0; }
 window.__od = { MOTIONS, PAIRS, makeRound, poseOf, strength, gridFor, tiersFor, tapCell, startRun,
-  get round() { return round; }, get score() { return score; }, get left() { return left; }, get state() { return state; }, setRnd: f => rnd = f };
+  get round() { return round; }, get score() { return score; }, get lives() { return lives; }, get roundLeft() { return roundLeft; }, get state() { return state; }, setRnd: f => rnd = f };
 requestAnimationFrame(frame);
 </script>
 </body>
